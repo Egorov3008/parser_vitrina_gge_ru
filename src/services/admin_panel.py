@@ -115,10 +115,13 @@ class AdminPanelService:
         user_id = update.effective_user.id
 
         if not self._check_admin(user_id):
-            await update.message.reply_text(
-                "❌ У вас нет прав администратора.\n\n"
-                "Обратитесь к текущему администратору для добавления."
-            )
+            if update.callback_query:
+                await update.callback_query.answer("❌ Нет прав доступа", show_alert=True)
+            else:
+                await update.message.reply_text(
+                    "❌ У вас нет прав администратора.\n\n"
+                    "Обратитесь к текущему администратору для добавления."
+                )
             return
 
         settings = self.repo.get_all_settings()
@@ -157,7 +160,10 @@ class AdminPanelService:
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        if update.callback_query:
+            await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка callback запросов от кнопок"""
@@ -257,7 +263,7 @@ class AdminPanelService:
         if nav_row:
             keyboard.append(nav_row)
 
-        keyboard.append([InlineKeyboardButton("❌ Выйти из панели", callback_data=CALLBACK_EXIT)])
+        keyboard.append([InlineKeyboardButton("✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -317,7 +323,7 @@ class AdminPanelService:
         if nav_row:
             keyboard.append(nav_row)
 
-        keyboard.append([InlineKeyboardButton("❌ Выйти из панели", callback_data=CALLBACK_EXIT)])
+        keyboard.append([InlineKeyboardButton("✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")

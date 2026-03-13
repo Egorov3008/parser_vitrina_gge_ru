@@ -28,22 +28,27 @@ admin_panel: Optional[AdminPanelService] = None
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработка inline кнопок"""
+    """Обработка inline кнопок (только топ-уровневые)"""
     query = update.callback_query
     data = query.data
 
-    await query.answer()
-
+    # Обрабатываем только топ-уровневые кнопки
     if data == "cmd_status":
+        await query.answer()
         await status_command(update, context)
     elif data == "cmd_run_now":
+        await query.answer()
         await run_now_command(update, context)
     elif data == "cmd_stats":
+        await query.answer()
         await stats_command(update, context)
     elif data == "cmd_admin":
+        await query.answer()
         await admin_command(update, context)
     elif data == "cmd_help":
+        await query.answer()
         await help_command(update, context)
+    # Остальные кнопки обработает админ-панель
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -258,7 +263,11 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Команда /admin - панель администратора"""
     global admin_panel
     if not admin_panel:
-        await update.message.reply_text("❌ Админ-панель не инициализирована")
+        text = "❌ Админ-панель не инициализирована"
+        if update.callback_query:
+            await update.callback_query.answer(text, show_alert=True)
+        else:
+            await update.message.reply_text(text)
         return
 
     user_id = str(update.effective_user.id) if update.effective_user else ""
@@ -276,7 +285,10 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "Или попросите текущего администратора\n"
             "добавить вас через /add_admin"
         )
-        await update.message.reply_html(message)
+        if update.callback_query:
+            await update.callback_query.answer(message, show_alert=True)
+        else:
+            await update.message.reply_html(message)
         return
 
     await admin_panel.show_admin_menu(update, context)
@@ -404,8 +416,8 @@ async def main_with_retry():
             app.add_handler(CommandHandler("admin", admin_command))
             app.add_handler(CommandHandler("add_admin", add_admin_command))
 
-            # Добавить обработчик inline кнопок
-            app.add_handler(CallbackQueryHandler(handle_callback))
+            # Добавить обработчик inline кнопок (только топ-уровневые)
+            app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^cmd_"))
 
             # Добавить обработчики админ-панели
             for handler in admin_panel.get_handlers():
