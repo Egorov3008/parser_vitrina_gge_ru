@@ -1,5 +1,4 @@
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional
 
 import httpx
@@ -11,6 +10,87 @@ from src.db.repository import Project
 from src.utils.logger import get_logger
 
 logger = get_logger()
+
+# Словарь сопоставления русских лейблов с полями датакласса Project
+LABEL_MAPPING = {
+    "номер экспертизы": "expertise_num",
+    "№ экспертизы": "expertise_num",
+    "экспертная организация": "expert_org",
+    "орган экспертизы": "expert_org",
+    "застройщик": "developer",
+    "технический заказчик": "tech_customer",
+    "техзаказчик": "tech_customer",
+    "регион": "region",
+    "субъект": "region",
+    "категория": "category",
+    "функциональное назначение": "category",
+    "наименование объекта": "object_name",
+    "наименование": "object_name",
+    "объект капитального строительства": "object_name",
+}
+
+# JS-код для извлечения всех пар лейбл-значение + секции характеристик
+JS_EXTRACT_PAIRS = """
+() => {
+    const pairs = {};
+    const charSection = {};
+
+    // Структура 1: таблицы <tr><td>Лейбл</td><td>Значение</td></tr>
+    document.querySelectorAll('tr').forEach(tr => {
+        const cells = tr.querySelectorAll('td, th');
+        if (cells.length >= 2) {
+            const label = cells[0].innerText.trim();
+            const value = cells[1].innerText.trim();
+            if (label && value && label.length < 150) pairs[label] = value;
+        }
+    });
+
+    // Структура 2: dl/dt/dd
+    document.querySelectorAll('dl').forEach(dl => {
+        const items = dl.querySelectorAll('dt, dd');
+        for (let i = 0; i < items.length - 1; i++) {
+            if (items[i].tagName === 'DT' && items[i+1].tagName === 'DD') {
+                const label = items[i].innerText.trim();
+                const value = items[i+1].innerText.trim();
+                if (label && value) pairs[label] = value;
+            }
+        }
+    });
+
+    // Структура 3: div-пары с классами label/value
+    ['[class*="label"]', '[class*="field-name"]', '[class*="prop-name"]'].forEach(sel => {
+        document.querySelectorAll(sel).forEach(labelEl => {
+            const valueEl = labelEl.nextElementSibling;
+            if (valueEl) {
+                const label = labelEl.innerText.trim();
+                const value = valueEl.innerText.trim();
+                if (label && value && label.length < 150) pairs[label] = value;
+            }
+        });
+    });
+
+    // Секция "Характеристики" — ищем по заголовку
+    const headers = document.querySelectorAll('h2, h3, h4, .section-title, .block-title');
+    headers.forEach(h => {
+        const text = h.innerText.toLowerCase();
+        if (text.includes('характеристик') || text.includes('параметр')) {
+            const container = h.nextElementSibling;
+            if (container) {
+                container.querySelectorAll('tr').forEach(tr => {
+                    const cells = tr.querySelectorAll('td');
+                    if (cells.length >= 2) {
+                        const k = cells[0].innerText.trim();
+                        const v = cells[1].innerText.trim();
+                        if (k && v) charSection[k] = v;
+                    }
+                });
+            }
+        }
+    });
+
+    return { pairs, charSection };
+}
+"""
 
 
 class ProjectsService:
@@ -198,26 +278,59 @@ class ProjectsService:
 
         return projects
 
-    async def fetch_details(self, project_url: str) -> Optional[dict]:
-        """
-        Получить детали проекта со страницы
+    def _map_labels_to_fields(self, raw_pairs: dict) -> dict:
+        """Сопоставить извлечённые пары лейбл-значение с полями проекта"""
+        result = {}
+        characteristics = {}
 
-        Возвращает дополнительные поля для проекта.
-        """
+        for raw_label, value in raw_pairs.items():
+            label_lower = raw_label.lower().strip()
+            matched_field = None
+
+            # Точное совпадение
+            if label_lower in LABEL_MAPPING:
+                matched_field = LABEL_MAPPING[label_lower]
+            else:
+                # Нечёткое: ключ маппинга как подстрока лейбла
+                for key, field in LABEL_MAPPING.items():
+                    if key in label_lower:
+                        matched_field = field
+                        break
+
+            if matched_field:
+                if matched_field not in result:  # не перезаписывать более конкретное
+                    result[matched_field] = value.strip()
+            else:
+                characteristics[raw_label] = value.strip()
+
+        result["characteristics"] = characteristics if characteristics else None
+        return result
+
+    async def fetch_details(self, project_url: str) -> Optional[dict]:
+        """Получить детали проекта через умный парсинг страницы"""
         try:
             await self.session.goto(project_url)
+            # session.goto уже использует wait_until="networkidle"
+            # Небольшая задержка для динамически подгружаемых блоков
+            await self.session.page.wait_for_timeout(500)
 
-            # Примерные селекторы для деталей
-            characteristics = {}
+            raw_data = await self.session.page.evaluate(JS_EXTRACT_PAIRS)
 
-            # Попытаться извлечь различные поля
-            characteristics["area"] = await self.scraper.extract_text(".area")
-            characteristics["cost"] = await self.scraper.extract_text(".cost")
-            characteristics["floors"] = await self.scraper.extract_text(".floors")
+            if not raw_data.get("pairs"):
+                logger.warning(f"No label-value pairs found on {project_url}")
 
-            return {
-                "characteristics": characteristics,
-            }
+            result = self._map_labels_to_fields(raw_data.get("pairs", {}))
+
+            # Добавить данные из секции характеристик
+            char_section = raw_data.get("charSection", {})
+            if char_section:
+                if result.get("characteristics"):
+                    result["characteristics"].update(char_section)
+                else:
+                    result["characteristics"] = char_section
+
+            logger.debug(f"Details for {project_url}: {list(result.keys())}")
+            return result
 
         except Exception as e:
             logger.error(f"Error fetching details from {project_url}: {e}")

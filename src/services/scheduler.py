@@ -113,7 +113,18 @@ class SchedulerService:
                         project.url
                     )
 
-                # Сохранить в БД
+                # Применить детали к объекту project перед сохранением
+                if details:
+                    project.expertise_num = details.get("expertise_num") or project.expertise_num
+                    project.object_name = details.get("object_name") or project.object_name
+                    project.expert_org = details.get("expert_org") or project.expert_org
+                    project.developer = details.get("developer") or project.developer
+                    project.tech_customer = details.get("tech_customer") or project.tech_customer
+                    project.region = details.get("region") or project.region
+                    project.category = details.get("category") or project.category
+                    project.characteristics = details.get("characteristics")
+
+                # Сохранить в БД (теперь project заполнен)
                 self.repository.save_project(project)
 
                 # Отправить уведомление
