@@ -41,7 +41,8 @@ JS_EXTRACT_PAIRS = """
         if (cells.length >= 2) {
             const label = cells[0].innerText.trim();
             const value = cells[1].innerText.trim();
-            if (label && value && label.length < 150) pairs[label] = value;
+            if (label && value && label.length < 150 && value.length < 300 && !value.includes('\\n'))
+                pairs[label] = value;
         }
     });
 
@@ -52,7 +53,7 @@ JS_EXTRACT_PAIRS = """
             if (items[i].tagName === 'DT' && items[i+1].tagName === 'DD') {
                 const label = items[i].innerText.trim();
                 const value = items[i+1].innerText.trim();
-                if (label && value) pairs[label] = value;
+                if (label && value && value.length < 300 && !value.includes('\\n')) pairs[label] = value;
             }
         }
     });
@@ -64,7 +65,8 @@ JS_EXTRACT_PAIRS = """
             if (valueEl) {
                 const label = labelEl.innerText.trim();
                 const value = valueEl.innerText.trim();
-                if (label && value && label.length < 150) pairs[label] = value;
+                if (label && value && label.length < 150 && value.length < 300 && !value.includes('\\n'))
+                    pairs[label] = value;
             }
         });
     });
@@ -81,7 +83,7 @@ JS_EXTRACT_PAIRS = """
                     if (cells.length >= 2) {
                         const k = cells[0].innerText.trim();
                         const v = cells[1].innerText.trim();
-                        if (k && v) charSection[k] = v;
+                        if (k && v && v.length < 300 && !v.includes('\\n')) charSection[k] = v;
                     }
                 });
             }
@@ -114,24 +116,35 @@ class ProjectsService:
         if self.client:
             await self.client.aclose()
 
-    async def fetch_list(self, limit: int = 100) -> List[Project]:
+    async def fetch_list(
+        self, limit: int = 100,
+        categories: Optional[List[str]] = None,
+        regions: Optional[List[str]] = None,
+    ) -> List[Project]:
         """
         Получить список проектов с применением фильтров.
 
         Попытается использовать API, если доступен, иначе парсит DOM.
         """
+        effective_categories = categories if categories is not None else self.config.filter_categories
+        effective_regions = regions if regions is not None else self.config.filter_regions
+
         try:
             # Попробовать получить через API
             token = await self.session.get_api_token()
             if token:
-                return await self._fetch_via_api(token, limit)
+                return await self._fetch_via_api(token, limit, effective_categories, effective_regions)
         except Exception as e:
             logger.warning(f"API fetch failed: {e}, falling back to DOM parsing")
 
         # Fallback на DOM парсинг
-        return await self._fetch_via_dom(limit)
+        return await self._fetch_via_dom(limit, effective_categories, effective_regions)
 
-    async def _fetch_via_api(self, token: str, limit: int) -> List[Project]:
+    async def _fetch_via_api(
+        self, token: str, limit: int,
+        categories: Optional[List[str]] = None,
+        regions: Optional[List[str]] = None,
+    ) -> List[Project]:
         """Получить проекты через API"""
         logger.info("Fetching projects via API")
 
@@ -141,10 +154,10 @@ class ProjectsService:
         }
 
         # Добавить фильтры
-        if self.config.filter_categories:
-            params["categories"] = ",".join(self.config.filter_categories)
-        if self.config.filter_regions:
-            params["regions"] = ",".join(self.config.filter_regions)
+        if categories:
+            params["categories"] = ",".join(categories)
+        if regions:
+            params["regions"] = ",".join(regions)
 
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -182,7 +195,11 @@ class ProjectsService:
             logger.error(f"API error: {e}")
             raise
 
-    async def _fetch_via_dom(self, limit: int = 100) -> List[Project]:
+    async def _fetch_via_dom(
+        self, limit: int = 100,
+        categories: Optional[List[str]] = None,
+        regions: Optional[List[str]] = None,
+    ) -> List[Project]:
         """Получить проекты через POST /projects/search (JSON API)"""
         logger.info("Fetching projects via search API")
 
@@ -204,10 +221,10 @@ class ProjectsService:
         }
 
         # Добавить фильтры
-        if self.config.filter_categories:
-            search_data["function"] = self.config.filter_categories
-        if self.config.filter_regions:
-            search_data["region"] = self.config.filter_regions
+        if categories:
+            search_data["function"] = categories
+        if regions:
+            search_data["region"] = regions
 
         try:
             response = await self.session.page.request.post(

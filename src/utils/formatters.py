@@ -24,21 +24,20 @@ def format_project_notification(project: Project, details: Optional[Dict] = None
     if project.tech_customer:
         html += f"🔧 <b>Технический заказчик:</b> {escape_html(project.tech_customer)}\n"
 
-    if project.region:
-        html += f"📄 <b>Регион:</b> {escape_html(project.region)}\n"
-
-    if project.category:
-        html += f"📁 <b>Категория:</b> {escape_html(project.category)}\n"
-
     # Характеристики из деталей
     if details and "characteristics" in details:
         chars = details["characteristics"]
         if isinstance(chars, dict) and chars:
             html += "\n📊 <b>Характеристики:</b>\n"
             for key, value in chars.items():
-                if value:
-                    label = format_characteristic_label(key)
-                    html += f"• {label}: {escape_html(str(value))}\n"
+                if not value:
+                    continue
+                value_str = str(value)
+                # Пропускать списки вариантов (мусор из radio/checkbox ячеек)
+                if '\n' in value_str or len(value_str) > 200:
+                    continue
+                label = format_characteristic_label(key)
+                html += f"• {label}: {escape_html(value_str)}\n"
 
     # Ссылка на проект
     if project.url:

@@ -82,12 +82,17 @@ class SchedulerService:
 
             logger.info(f"Last run: {last_run_at or 'never'}")
             logger.info(f"Expertise year filter: {year_from or '—'} - {year_to or '—'}")
+            logger.info(f"Category filter: {settings.filter_categories or 'all'}")
+            logger.info(f"Region filter: {settings.filter_regions or 'all'}")
 
             # Убедиться, что авторизованы
             await self.session.ensure_logged_in()
 
-            # Получить список проектов
-            projects = await self.projects_service.fetch_list()
+            # Получить список проектов с фильтрами из БД
+            projects = await self.projects_service.fetch_list(
+                categories=settings.filter_categories or None,
+                regions=settings.filter_regions or None,
+            )
             logger.info(f"Fetched {len(projects)} projects")
 
             # Фильтр по дате последнего запуска
