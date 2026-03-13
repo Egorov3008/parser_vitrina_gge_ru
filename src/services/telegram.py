@@ -1,10 +1,11 @@
-from typing import Optional
+from typing import List, Optional
+from io import BytesIO
 
 from telegram import Bot, BotCommand
 from telegram.constants import ParseMode
 
 from src.config import get_config
-from src.utils.formatters import format_alert, format_stats, format_status
+from src.utils.formatters import format_alert, format_stats, format_status, format_summary
 from src.utils.logger import get_logger
 
 logger = get_logger()
@@ -18,75 +19,86 @@ class TelegramService:
         self.bot = Bot(token=self.config.telegram_bot_token)
         self.chat_id = self.config.telegram_chat_id
 
-    async def send_notification(self, message: str) -> None:
+    async def send_notification(self, message: str, chat_ids: Optional[List[str]] = None) -> None:
         """Отправить уведомление о новом проекте"""
-        try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False,
-            )
-            logger.debug("Notification sent")
-        except Exception as e:
-            logger.error(f"Error sending notification: {e}")
-            raise
+        target_chats = chat_ids if chat_ids else [self.chat_id]
 
-    async def send_summary(self, new_count: int) -> None:
+        for chat_id in target_chats:
+            try:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=False,
+                )
+            except Exception as e:
+                logger.error(f"Error sending notification to {chat_id}: {e}")
+
+    async def send_summary(self, new_count: int, chat_ids: Optional[List[str]] = None) -> None:
         """Отправить сводку по результатам парсинга"""
         message = format_summary(new_count)
-        try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode=ParseMode.HTML,
-            )
-            logger.debug(f"Summary sent: {new_count} new projects")
-        except Exception as e:
-            logger.error(f"Error sending summary: {e}")
+        target_chats = chat_ids if chat_ids else [self.chat_id]
 
-    async def send_alert(self, error_message: str) -> None:
+        for chat_id in target_chats:
+            try:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception as e:
+                logger.error(f"Error sending summary to {chat_id}: {e}")
+
+    async def send_alert(self, error_message: str, chat_ids: Optional[List[str]] = None) -> None:
         """Отправить оповещение об ошибке"""
         message = format_alert(error_message)
-        try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode=ParseMode.HTML,
-            )
-            logger.error(f"Alert sent: {error_message}")
-        except Exception as e:
-            logger.error(f"Error sending alert: {e}")
+        target_chats = chat_ids if chat_ids else [self.chat_id]
 
-    async def send_status(self, run_log: Optional[dict]) -> None:
+        for chat_id in target_chats:
+            try:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception as e:
+                logger.error(f"Error sending alert to {chat_id}: {e}")
+
+    async def send_status(self, run_log: Optional[dict], chat_ids: Optional[List[str]] = None) -> None:
         """Отправить статус последнего запуска"""
         message = format_status(run_log)
-        try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode=ParseMode.HTML,
-            )
-            logger.debug("Status sent")
-        except Exception as e:
-            logger.error(f"Error sending status: {e}")
+        target_chats = chat_ids if chat_ids else [self.chat_id]
 
-    async def send_stats(self, stats: dict, recent_errors: Optional[list] = None) -> None:
+        for chat_id in target_chats:
+            try:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception as e:
+                logger.error(f"Error sending status to {chat_id}: {e}")
+
+    async def send_stats(self, stats: dict, recent_errors: Optional[list] = None, chat_ids: Optional[List[str]] = None) -> None:
         """Отправить статистику"""
         message = format_stats(stats, recent_errors)
-        try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode=ParseMode.HTML,
-            )
-            logger.debug("Stats sent")
-        except Exception as e:
-            logger.error(f"Error sending stats: {e}")
+        target_chats = chat_ids if chat_ids else [self.chat_id]
+
+        for chat_id in target_chats:
+            try:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception as e:
+                logger.error(f"Error sending stats to {chat_id}: {e}")
 
     async def setup_commands(self) -> None:
         """Настроить команды бота"""
         commands = [
+            BotCommand("start", "Основное меню"),
+            BotCommand("admin", "Админ-панель"),
             BotCommand("status", "Последний запуск парсера"),
             BotCommand("run_now", "Запустить парсер немедленно"),
             BotCommand("stats", "Статистика проектов"),
@@ -98,6 +110,25 @@ class TelegramService:
             logger.info("Bot commands configured")
         except Exception as e:
             logger.error(f"Error setting up commands: {e}")
+
+    async def send_file(self, file_content: str, filename: str, chat_ids: Optional[List[str]] = None, caption: Optional[str] = None) -> None:
+        """Отправить файл через Telegram"""
+        target_chats = chat_ids if chat_ids else [self.chat_id]
+
+        for chat_id in target_chats:
+            try:
+                file_bytes = file_content.encode('utf-8')
+                file_obj = BytesIO(file_bytes)
+                file_obj.name = filename
+
+                await self.bot.send_document(
+                    chat_id=chat_id,
+                    document=file_obj,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML if caption else None,
+                )
+            except Exception as e:
+                logger.error(f"Error sending file to {chat_id}: {e}")
 
     async def close(self) -> None:
         """Закрыть сессию бота"""

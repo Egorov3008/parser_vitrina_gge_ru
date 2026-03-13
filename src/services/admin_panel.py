@@ -2,10 +2,12 @@
 Админ-панель для управления настройками парсера
 """
 
+import json
 from datetime import datetime
 from typing import List, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from src.config import get_config
@@ -29,6 +31,12 @@ CALLBACK_REMOVE_ADMIN = "admin_remove"
 CALLBACK_ADMINS = "admin_list"
 CALLBACK_PREV_PAGE = "admin_prev"
 CALLBACK_NEXT_PAGE = "admin_next"
+CALLBACK_NOTIFICATION_CHATS = "admin_chats"
+CALLBACK_ADD_CHAT = "admin_add_chat"
+CALLBACK_REMOVE_CHAT = "admin_remove_chat"
+CALLBACK_CLEAR_DATA = "admin_clear_data"
+CALLBACK_CLEAR_DATA_CONFIRM = "admin_clear_data_confirm"
+CALLBACK_EXPORT = "admin_export"
 
 ITEMS_PER_PAGE = 5
 
@@ -65,33 +73,92 @@ class AdminPanelService:
         "Гидротехнические и защитные сооружения",
     ]
 
-    # Регионы
+    # Регионы (полный список из 85 федеральных субъектов РФ)
     ALL_REGIONS = [
-        "Москва",
-        "Московская область",
-        "Санкт-Петербург",
-        "Ленинградская область",
-        "Новосибирская область",
-        "Свердловская область",
-        "Краснодарский край",
-        "Республика Татарстан",
-        "Нижегородская область",
-        "Челябинская область",
-        "Самарская область",
-        "Омская область",
-        "Ростовская область",
-        "Уфа",
-        "Пермский край",
-        "Воронежская область",
-        "Волгоградская область",
-        "Красноярский край",
-        "Саратовская область",
-        "Тюменская область",
-        "Приморский край",
-        "Иркутская область",
-        "Хабаровский край",
-        "Оренбургская область",
-        "Кемеровская область",
+        "01. Республика Адыгея",
+        "02. Республика Башкортостан",
+        "03. Республика Бурятия",
+        "04. Республика Алтай",
+        "05. Республика Дагестан",
+        "06. Республика Ингушетия",
+        "07. Кабардино-Балкарская Республика",
+        "08. Республика Калмыкия",
+        "09. Карачаево-Черкесская Республика",
+        "10. Республика Карелия",
+        "11. Республика Коми",
+        "12. Республика Марий Эл",
+        "13. Республика Мордовия",
+        "14. Республика Саха (Якутия)",
+        "15. Республика Северная Осетия — Алания",
+        "16. Республика Татарстан",
+        "17. Республика Тыва",
+        "18. Удмуртская Республика",
+        "19. Республика Хакасия",
+        "20. Чеченская Республика",
+        "21. Чувашская Республика",
+        "22. Алтайский край",
+        "23. Краснодарский край",
+        "24. Красноярский край",
+        "25. Приморский край",
+        "26. Ставропольский край",
+        "27. Хабаровский край",
+        "29. Амурская область",
+        "30. Архангельская область",
+        "31. Астраханская область",
+        "32. Белгородская область",
+        "33. Брянская область",
+        "34. Владимирская область",
+        "35. Волгоградская область",
+        "36. Вологодская область",
+        "37. Воронежская область",
+        "38. Ивановская область",
+        "39. Иркутская область",
+        "40. Калининградская область",
+        "41. Калужская область",
+        "42. Камчатский край",
+        "43. Кемеровская область",
+        "44. Кировская область",
+        "45. Костромская область",
+        "46. Курганская область",
+        "47. Курская область",
+        "48. Ленинградская область",
+        "49. Липецкая область",
+        "50. Магаданская область",
+        "51. Московская область",
+        "52. Мурманская область",
+        "53. Нижегородская область",
+        "54. Новгородская область",
+        "55. Новосибирская область",
+        "56. Омская область",
+        "57. Оренбургская область",
+        "58. Орловская область",
+        "59. Пензенская область",
+        "60. Пермский край",
+        "61. Приморский край",
+        "62. Псковская область",
+        "63. Ростовская область",
+        "64. Рязанская область",
+        "65. Самарская область",
+        "66. Саратовская область",
+        "67. Смоленская область",
+        "68. Свердловская область",
+        "69. Тамбовская область",
+        "70. Тверская область",
+        "71. Томская область",
+        "72. Тульская область",
+        "73. Тюменская область",
+        "74. Тюменская область (ХМАО)",
+        "75. Тюменская область (ЯНАО)",
+        "76. Ульяновская область",
+        "77. г. Москва",
+        "78. г. Санкт-Петербург",
+        "79. Еврейская автономная область",
+        "80. Чукотский автономный округ",
+        "81. Республика Крым",
+        "82. г. Севастополь",
+        "83. Сахалинская область",
+        "84. Заморские регионы",
+        "85. Забайкальский край",
     ]
 
     def __init__(self, repo: Repository):
@@ -124,45 +191,12 @@ class AdminPanelService:
                 )
             return
 
-        settings = self.repo.get_all_settings()
-
-        # Формируем сообщение со статусом
-        categories_count = len(settings.filter_categories)
-        regions_count = len(settings.filter_regions)
-        year_from = settings.expertise_year_from or "—"
-        year_to = settings.expertise_year_to or "—"
-        year_range = f"{year_from} - {year_to}" if year_from != "—" or year_to != "—" else "все"
-
-        text = (
-            "⚙️ <b>Админ-панель парсера</b>\n\n"
-            "📊 <b>Текущие настройки:</b>\n"
-            f"• Категории: {categories_count} выбр.\n"
-            f"• Регионы: {regions_count} выбр.\n"
-            f"• Год экспертизы: {year_range}\n"
-            f"• Расписание: {settings.cron_schedule}\n\n"
-            "Выберите действие:"
-        )
-
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "📁 Категории", callback_data=CALLBACK_CATEGORIES
-                ),
-                InlineKeyboardButton("📍 Регионы", callback_data=CALLBACK_REGIONS),
-            ],
-            [
-                InlineKeyboardButton("📅 Год экспертизы", callback_data=CALLBACK_EXPERTISE_YEAR),
-                InlineKeyboardButton("⏰ Расписание", callback_data=CALLBACK_SCHEDULE),
-            ],
-            [
-                InlineKeyboardButton("👥 Админы", callback_data=CALLBACK_ADMINS),
-            ],
-        ]
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
         if update.callback_query:
-            await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+            await self.show_admin_menu_from_query(update.callback_query)
         else:
+            settings = self.repo.get_all_settings()
+            text, keyboard = self._build_admin_menu_content(settings)
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,10 +237,14 @@ class AdminPanelService:
             await self._add_admin(query, data.split(":")[1])
         elif data.startswith(f"{CALLBACK_REMOVE_ADMIN}:"):
             await self._remove_admin(query, data.split(":")[1])
+        elif data == CALLBACK_NOTIFICATION_CHATS:
+            await self._show_chats_menu(query, context)
+        elif data.startswith(f"{CALLBACK_REMOVE_CHAT}:"):
+            await self._remove_chat(query, context, data.split(":")[1])
         elif data == CALLBACK_BACK:
             await self._show_back_menu(query, context)
         elif data == CALLBACK_EXIT:
-            await self._exit_panel(query)
+            await self._exit_panel(query, context)
         elif data == CALLBACK_SAVE:
             await self._save_settings(query)
         elif data.startswith("cat:"):
@@ -224,6 +262,12 @@ class AdminPanelService:
         elif data.startswith("regpage:"):
             page = int(data[8:])
             await self._show_regions_menu(query, page)
+        elif data == CALLBACK_CLEAR_DATA:
+            await self._show_clear_data_confirmation(query)
+        elif data == CALLBACK_CLEAR_DATA_CONFIRM:
+            await self._perform_clear_data(query)
+        elif data == CALLBACK_EXPORT:
+            await self._perform_export(query)
 
     async def _show_categories_menu(self, query, page: int = 0):
         """Меню выбора категорий с пагинацией"""
@@ -505,27 +549,88 @@ class AdminPanelService:
         await query.answer(f"✅ Администратор {telegram_id} удалён", show_alert=True)
         await self._show_admins_menu(query)
 
+    async def _show_chats_menu(self, query, context):
+        """Меню управления чатами для отправки уведомлений"""
+        chats = self.repo.get_all_notification_chats()
+
+        text = "📱 <b>Чаты для отправки уведомлений</b>\n\n"
+
+        if chats:
+            for chat in chats:
+                status = "✅" if chat.is_active else "❌"
+                chat_display = chat.chat_name or f"ID: {chat.chat_id}"
+                text += f"{status} {chat_display} (<code>{chat.chat_id}</code>)\n"
+        else:
+            text += "Нет добавленных чатов\n"
+
+        text += (
+            "\n<b>Для добавления нового чата:</b>\n"
+            "1. Отправьте /getChatId в нужный чат\n"
+            "2. Бот ответит с ID чата\n"
+            "3. Отправьте ID сообщением сюда\n\n"
+            "<b>Для приватного чата:</b>\n"
+            "• Добавьте бота в чат\n"
+            "• Отправьте команду\n"
+            "• ID будет отправлен в бот (приватный чат)\n\n"
+            "<b>Для личного чата:</b>\n"
+            "• Просто отправьте /getChatId здесь"
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)],
+        ]
+
+        if chats:
+            for chat in chats:
+                chat_display = chat.chat_name or f"ID: {chat.chat_id}"
+                keyboard.append(
+                    [
+                        InlineKeyboardButton(
+                            f"❌ {chat_display}",
+                            callback_data=f"{CALLBACK_REMOVE_CHAT}:{chat.chat_id}",
+                        )
+                    ]
+                )
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        context.user_data["waiting_chat_id"] = True
+
+    async def _remove_chat(self, query, context, chat_id: str):
+        """Удалить чат"""
+        self.repo.remove_notification_chat(chat_id)
+        await query.answer(f"✅ Чат {chat_id} удалён", show_alert=True)
+        await self._show_chats_menu(query, context)
+
     async def _show_back_menu(self, query, context):
         """Вернуться в главное меню"""
         # Очищаем состояние ожидания
         if "waiting_schedule" in context.user_data:
             del context.user_data["waiting_schedule"]
+        if "waiting_chat_id" in context.user_data:
+            del context.user_data["waiting_chat_id"]
 
         await self.show_admin_menu_from_query(query)
 
-    async def _exit_panel(self, query):
-        """Выйти из админ-панели"""
-        await query.edit_message_text(
-            "✅ Выход из админ-панели\n\n"
-            "Используйте /admin для возврата или /help для справки.",
-            reply_markup=None,
-            parse_mode="HTML",
-        )
+    async def _exit_panel(self, query, context):
+        """Выйти из админ-панели (вернуться в главное меню)"""
+        # Очищаем состояние ожидания расписания
+        if "waiting_schedule" in context.user_data:
+            del context.user_data["waiting_schedule"]
 
-    async def show_admin_menu_from_query(self, query):
-        """Показать меню админ-панели из callback query"""
-        settings = self.repo.get_all_settings()
+        try:
+            # Возвращаемся в главное меню
+            await self.show_admin_menu_from_query(query)
+        except BadRequest as e:
+            # Если сообщение не изменилось (уже на главном меню)
+            if "Message is not modified" in str(e):
+                await query.answer()
+            else:
+                logger.error(f"Failed to show admin menu: {e}")
+                raise
 
+    def _build_admin_menu_content(self, settings):
+        """Построить содержимое главного меню админ-панели"""
         categories_count = len(settings.filter_categories)
         regions_count = len(settings.filter_regions)
         year_from = settings.expertise_year_from or "—"
@@ -553,12 +658,20 @@ class AdminPanelService:
             ],
             [
                 InlineKeyboardButton("👥 Админы", callback_data=CALLBACK_ADMINS),
+                InlineKeyboardButton("📱 Чаты", callback_data=CALLBACK_NOTIFICATION_CHATS),
             ],
             [
-                InlineKeyboardButton("❌ Выйти из панели", callback_data=CALLBACK_EXIT),
+                InlineKeyboardButton("💾 Экспорт в .txt", callback_data=CALLBACK_EXPORT),
+                InlineKeyboardButton("🗑️ Очистить данные", callback_data=CALLBACK_CLEAR_DATA),
             ],
         ]
 
+        return text, keyboard
+
+    async def show_admin_menu_from_query(self, query):
+        """Показать меню админ-панели из callback query"""
+        settings = self.repo.get_all_settings()
+        text, keyboard = self._build_admin_menu_content(settings)
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
@@ -577,38 +690,202 @@ class AdminPanelService:
             return
 
         # Проверяем, ждём ли мы ввод расписания
-        if not context.user_data.get("waiting_schedule"):
-            return
+        if context.user_data.get("waiting_schedule"):
+            if update.message is None:
+                return
 
-        if update.message is None:
-            return
+            new_schedule = update.message.text.strip()
 
-        new_schedule = update.message.text.strip()
+            # Простая валидация cron (5 полей)
+            parts = new_schedule.split()
+            if len(parts) != 5:
+                await update.message.reply_text(
+                    "❌ Неверный формат cron. Должно быть 5 полей.\n"
+                    "Пример: <code>0 6 * * *</code>",
+                    parse_mode="HTML",
+                )
+                return
 
-        # Простая валидация cron (5 полей)
-        parts = new_schedule.split()
-        if len(parts) != 5:
+            settings = self.repo.get_all_settings()
+            settings.cron_schedule = new_schedule
+            self.repo.save_settings(settings)
+
+            del context.user_data["waiting_schedule"]
+
             await update.message.reply_text(
-                "❌ Неверный формат cron. Должно быть 5 полей.\n"
-                "Пример: <code>0 6 * * *</code>",
+                f"✅ Расписание обновлено: <code>{new_schedule}</code>",
                 parse_mode="HTML",
             )
             return
 
-        settings = self.repo.get_all_settings()
-        settings.cron_schedule = new_schedule
-        self.repo.save_settings(settings)
+        # Проверяем, ждём ли мы ввод ID чата
+        if context.user_data.get("waiting_chat_id"):
+            if update.message is None:
+                return
 
-        del context.user_data["waiting_schedule"]
+            chat_id_input = update.message.text.strip()
 
-        await update.message.reply_text(
-            f"✅ Расписание обновлено: <code>{new_schedule}</code>",
-            parse_mode="HTML",
+            # Проверяем, что это число (ID чата)
+            try:
+                # ID могут быть отрицательными (группы) или положительными (личные чаты)
+                int(chat_id_input)
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Неверный ID чата. Должно быть число.\n"
+                    "Пример: <code>123456789</code> или <code>-1001234567890</code>",
+                    parse_mode="HTML",
+                )
+                return
+
+            # Добавляем чат
+            self.repo.add_notification_chat(chat_id_input)
+
+            await update.message.reply_text(
+                f"✅ Чат {chat_id_input} добавлен для отправки уведомлений",
+                parse_mode="HTML",
+            )
+
+            # Очищаем флаг ожидания
+            del context.user_data["waiting_chat_id"]
+            return
+
+    async def _show_clear_data_confirmation(self, query):
+        """Показать подтверждение очистки данных"""
+        stats = self.repo.get_stats()
+
+        text = (
+            "⚠️ <b>Внимание! Необратимая операция</b>\n\n"
+            "Это удалит ВСЕ сохранённые данные:\n\n"
+            f"🗂️ Проектов: {stats.get('total_projects', 0)}\n"
+            f"📋 Логов запусков: {len(self.repo.get_recent_errors(limit=1000))}\n\n"
+            "Вы <b>не сможете восстановить</b> эти данные!\n\n"
+            "Вы уверены, что хотите продолжить?"
         )
 
-    def get_handlers(self):
-        """Получить обработчики callback запросов"""
-        return [
-            CallbackQueryHandler(self.handle_callback),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_schedule_input),
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Да, удалить", callback_data=CALLBACK_CLEAR_DATA_CONFIRM),
+                InlineKeyboardButton("❌ Отмена", callback_data=CALLBACK_BACK),
+            ]
         ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+    async def _perform_clear_data(self, query):
+        """Выполнить очистку данных"""
+        try:
+            result = self.repo.clear_all_data()
+
+            text = (
+                "✅ <b>Данные успешно очищены!</b>\n\n"
+                f"🗂️ Удалено проектов: {result['projects_deleted']}\n"
+                f"📋 Удалено логов: {result['logs_deleted']}\n\n"
+                "Парсер готов к новому запуску."
+            )
+
+            keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+            logger.info(f"Data cleared by admin {query.from_user.id}: {result['projects_deleted']} projects, {result['logs_deleted']} logs")
+
+        except Exception as e:
+            logger.error(f"Error clearing data: {e}")
+            await query.answer(f"❌ Ошибка при очистке: {str(e)}", show_alert=True)
+
+    def _format_projects_to_txt(self, projects: list) -> str:
+        """Форматировать проекты в текст для экспорта"""
+        if not projects:
+            return "Нет проектов для экспорта"
+
+        lines = [
+            "=" * 100,
+            f"ЭКСПОРТ ДАННЫХ ПРОЕКТОВ - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "=" * 100,
+            f"Всего проектов: {len(projects)}\n",
+        ]
+
+        for idx, project in enumerate(projects, 1):
+            lines.append("-" * 100)
+            lines.append(f"Проект #{idx}")
+            lines.append("-" * 100)
+
+            # Базовые поля
+            lines.append(f"ID: {project.get('vitrina_id', 'N/A')}")
+            lines.append(f"Номер экспертизы: {project.get('expertise_num', 'N/A')}")
+            lines.append(f"Название объекта: {project.get('object_name', 'N/A')}")
+            lines.append(f"Организация-эксперт: {project.get('expert_org', 'N/A')}")
+            lines.append(f"Разработчик: {project.get('developer', 'N/A')}")
+            lines.append(f"Технический заказчик: {project.get('tech_customer', 'N/A')}")
+            lines.append(f"Регион: {project.get('region', 'N/A')}")
+            lines.append(f"Категория: {project.get('category', 'N/A')}")
+            lines.append(f"URL: {project.get('url', 'N/A')}")
+            lines.append(f"Опубликовано: {project.get('published_at', 'N/A')}")
+            lines.append(f"Обновлено: {project.get('updated_at', 'N/A')}")
+            lines.append(f"Создано в БД: {project.get('created_at', 'N/A')}")
+            lines.append(f"Уведомлено: {project.get('notified_at', 'N/A') or 'Нет'}")
+
+            # Характеристики
+            if project.get('characteristics'):
+                try:
+                    chars = json.loads(project.get('characteristics'))
+                    if chars:
+                        lines.append("\nДополнительные характеристики:")
+                        for key, value in chars.items():
+                            val_str = str(value).strip()
+                            # Фильтровать значения "Не выбрано" и аналогичные
+                            if val_str in ('Не выбрано', 'Сведения отсутствуют', '-', ''):
+                                continue
+                            lines.append(f"  • {key}: {val_str}")
+                except:
+                    pass
+
+            lines.append("")
+
+        lines.append("=" * 100)
+        lines.append("Конец экспорта")
+        lines.append("=" * 100)
+
+        return "\n".join(lines)
+
+    async def _perform_export(self, query):
+        """Выполнить экспорт данных в .txt файл"""
+        try:
+            from src.services.telegram import TelegramService
+
+            # Получить все проекты
+            projects = self.repo.get_all_projects()
+
+            if not projects:
+                await query.answer("❌ Нет данных для экспорта", show_alert=True)
+                return
+
+            # Форматировать в текст
+            txt_content = self._format_projects_to_txt(projects)
+
+            # Отправить файл
+            telegram_service = TelegramService()
+            caption = f"✅ Экспорт {len(projects)} проектов"
+
+            await telegram_service.send_file(
+                file_content=txt_content,
+                filename=f"projects_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                chat_ids=[str(query.from_user.id)],
+                caption=caption,
+            )
+
+            await query.answer("✅ Файл отправлен!", show_alert=False)
+            logger.info(f"Data exported by admin {query.from_user.id}: {len(projects)} projects")
+
+        except Exception as e:
+            logger.error(f"Error exporting data: {e}")
+            await query.answer(f"❌ Ошибка при экспорте: {str(e)[:100]}", show_alert=True)
+
+    def get_callback_handler(self):
+        """Получить обработчик callback запросов"""
+        return CallbackQueryHandler(self.handle_callback)
+
+    def get_message_handler(self):
+        """Получить обработчик текстовых сообщений для расписания"""
+        return MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_schedule_input)

@@ -61,13 +61,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "/status - статус последнего запуска\n"
         "/run_now - запустить парсер сейчас\n"
         "/stats - статистика проектов\n"
-        "/admin - панель настроек (администраторам)\n\n"
+        "/admin - панель настроек (администраторам)\n"
+        "/getChatId - получить ID текущего чата\n\n"
         "⚙️ <b>Администраторам:</b>\n"
-        "Используйте /admin или кнопку ниже для настройки фильтров:\n"
-        "• Категории проектов\n"
-        "• Регионы\n"
-        "• Период фильтрации\n"
-        "• Расписание запуска\n\n"
+        "Используйте /admin или кнопку ниже для настройки:\n"
+        "• 📁 Категории проектов\n"
+        "• 📍 Регионы\n"
+        "• 📅 Период фильтрации\n"
+        "• ⏰ Расписание запуска\n"
+        "• 📱 Чаты для уведомлений\n"
+        "• 👥 Администраторы\n\n"
         "📚 <b>Документация:</b>\n"
         "ADMIN_PANEL.md - руководство по админ-панели"
     )
@@ -222,6 +225,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Запустить парсер немедленно (вне расписания)\n\n"
         "<b>/stats</b>\n"
         "Статистика проектов в базе данных\n\n"
+        "<b>/getChatId</b>\n"
+        "Получить ID текущего чата для добавления в уведомления\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⚙️ <b>Админ-панель:</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -231,12 +236,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• 📍 Регионы\n"
         "• 📅 Период фильтрации\n"
         "• ⏰ Расписание (cron)\n"
+        "• 📱 Управление чатами для уведомлений\n"
         "• 👥 Управление администраторами\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "ℹ️ <b>Информация:</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "Парсер автоматически проверяет новые проекты\n"
-        "по расписанию и отправляет уведомления в этот чат.\n\n"
+        "по расписанию и отправляет уведомления в настроенные чаты.\n\n"
         "Для доступа к админ-панели добавьте свой Telegram ID\n"
         "в переменную ADMIN_ID файла .env и перезапустите бота."
     )
@@ -338,6 +344,37 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 
+async def get_chat_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда /getChatId - получить ID текущего чата"""
+    if update.message is None or update.effective_chat is None:
+        return
+
+    chat = update.effective_chat
+    chat_id = chat.id
+    chat_type = chat.type
+
+    message = (
+        f"📱 <b>ID вашего чата:</b>\n\n"
+        f"<code>{chat_id}</code>\n\n"
+        f"<b>Тип:</b> {chat_type}\n"
+    )
+
+    if chat.title:
+        message += f"<b>Название:</b> {chat.title}\n"
+    if chat.username:
+        message += f"<b>Username:</b> @{chat.username}\n"
+
+    message += (
+        "\n<b>Как добавить этот чат в уведомления:</b>\n"
+        "1. Откройте админ-панель (/admin)\n"
+        "2. Нажмите на 📱 Чаты\n"
+        "3. Отправьте ID сообщением\n\n"
+        "✅ Чат будет добавлен и будет получать уведомления!"
+    )
+
+    await update.message.reply_html(message)
+
+
 async def initialize_services() -> tuple:
     """Инициализировать все сервисы"""
     config = get_config()
@@ -415,13 +452,14 @@ async def main_with_retry():
             app.add_handler(CommandHandler("help", help_command))
             app.add_handler(CommandHandler("admin", admin_command))
             app.add_handler(CommandHandler("add_admin", add_admin_command))
+            app.add_handler(CommandHandler("getChatId", get_chat_id_command))
 
             # Добавить обработчик inline кнопок (только топ-уровневые)
             app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^cmd_"))
 
             # Добавить обработчики админ-панели
-            for handler in admin_panel.get_handlers():
-                app.add_handler(handler)
+            app.add_handler(admin_panel.get_callback_handler())
+            app.add_handler(admin_panel.get_message_handler())
 
             # Запустить планировщик
             sched.start()

@@ -102,6 +102,19 @@ class Database:
             """
         )
 
+        # Таблица чатов для уведомлений
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_chats (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id         TEXT UNIQUE NOT NULL,
+                chat_name       TEXT,
+                is_active       BOOLEAN DEFAULT 1,
+                created_at      TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+
         # Индексы для быстрого поиска
         cursor.execute(
             """

@@ -59,6 +59,16 @@ class Admin:
 
 
 @dataclass
+class NotificationChat:
+    """Модель чата для отправки уведомлений"""
+
+    chat_id: str
+    chat_name: Optional[str] = None
+    is_active: bool = True
+    created_at: Optional[str] = None
+
+
+@dataclass
 class ParserSettings:
     """Группа настроек парсера"""
 
@@ -136,6 +146,16 @@ class Repository:
             """
             SELECT * FROM projects
             WHERE notified_at IS NULL
+            ORDER BY created_at DESC
+            """
+        )
+        return [dict(row) for row in rows] if rows else []
+
+    def get_all_projects(self) -> List[dict]:
+        """Получить все проекты из БД"""
+        rows = self.db.fetch_all(
+            """
+            SELECT * FROM projects
             ORDER BY created_at DESC
             """
         )
@@ -358,3 +378,85 @@ class Repository:
             )
             for row in rows
         ]
+
+    # ========== Чаты для уведомлений ==========
+
+    def add_notification_chat(self, chat_id: str, chat_name: Optional[str] = None) -> None:
+        """Добавить чат для отправки уведомлений"""
+        try:
+            self.db.execute(
+                """
+                INSERT INTO notification_chats (chat_id, chat_name, is_active)
+                VALUES (?, ?, 1)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    chat_name = excluded.chat_name,
+                    is_active = 1
+                """,
+                (chat_id, chat_name),
+            )
+            logger.info(f"Notification chat added: {chat_id} ({chat_name})")
+        except Exception as e:
+            logger.error(f"Error adding notification chat {chat_id}: {e}")
+            raise
+
+    def remove_notification_chat(self, chat_id: str) -> None:
+        """Удалить чат для отправки уведомлений"""
+        self.db.execute("DELETE FROM notification_chats WHERE chat_id = ?", (chat_id,))
+        logger.info(f"Notification chat removed: {chat_id}")
+
+    def get_notification_chats(self) -> List[NotificationChat]:
+        """Получить список активных чатов для отправки"""
+        rows = self.db.fetch_all(
+            "SELECT * FROM notification_chats WHERE is_active = 1 ORDER BY created_at DESC"
+        )
+        return [
+            NotificationChat(
+                chat_id=row["chat_id"],
+                chat_name=row["chat_name"],
+                is_active=row["is_active"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    def get_all_notification_chats(self) -> List[NotificationChat]:
+        """Получить все чаты (включая неактивные)"""
+        rows = self.db.fetch_all(
+            "SELECT * FROM notification_chats ORDER BY created_at DESC"
+        )
+        return [
+            NotificationChat(
+                chat_id=row["chat_id"],
+                chat_name=row["chat_name"],
+                is_active=row["is_active"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    # ========== Очистка данных ==========
+
+    def clear_all_data(self) -> dict:
+        """Очистить все данные (проекты и логи запусков)"""
+        try:
+            # Получить количество удаляемых записей перед удалением
+            projects_count = self.db.fetch_one("SELECT COUNT(*) as count FROM projects")
+            run_logs_count = self.db.fetch_one("SELECT COUNT(*) as count FROM run_logs")
+
+            projects_total = projects_count["count"] if projects_count else 0
+            logs_total = run_logs_count["count"] if run_logs_count else 0
+
+            # Удалить данные
+            self.db.execute("DELETE FROM projects")
+            self.db.execute("DELETE FROM run_logs")
+
+            logger.info(f"Data cleared: {projects_total} projects, {logs_total} run logs deleted")
+
+            return {
+                "success": True,
+                "projects_deleted": projects_total,
+                "logs_deleted": logs_total,
+            }
+        except Exception as e:
+            logger.error(f"Error clearing data: {e}")
+            raise

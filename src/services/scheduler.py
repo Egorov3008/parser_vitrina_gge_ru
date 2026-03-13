@@ -10,7 +10,7 @@ from src.db.database import Database
 from src.db.repository import Repository
 from src.services.projects import ProjectsService
 from src.services.telegram import TelegramService
-from src.utils.formatters import format_project_notification
+from src.utils.formatters import format_project_notification, format_teps_file
 from src.utils.logger import get_logger
 
 logger = get_logger()
@@ -85,23 +85,27 @@ class SchedulerService:
             logger.info(f"Category filter: {settings.filter_categories or 'all'}")
             logger.info(f"Region filter: {settings.filter_regions or 'all'}")
 
+            # Получить чаты для отправки уведомлений
+            notification_chats = self.repository.get_notification_chats()
+            chat_ids = [chat.chat_id for chat in notification_chats] if notification_chats else None
+            logger.info(f"Notification chats: {len(notification_chats) if notification_chats else 0}")
+
             # Убедиться, что авторизованы
             await self.session.ensure_logged_in()
 
             # Получить список проектов с фильтрами из БД
+            # Год экспертизы теперь фильтруется на стороне сервера при браузерном поиске
             projects = await self.projects_service.fetch_list(
                 categories=settings.filter_categories or None,
                 regions=settings.filter_regions or None,
+                year_from=year_from,
+                year_to=year_to,
             )
             logger.info(f"Fetched {len(projects)} projects")
 
             # Фильтр по дате последнего запуска
             projects = await self.projects_service.filter_by_last_run(projects, last_run_at)
             logger.info(f"After date filter: {len(projects)} projects")
-
-            # Фильтр по году экспертизы
-            projects = self.projects_service.filter_by_expertise_year(projects, year_from, year_to)
-            logger.info(f"After expertise year filter: {len(projects)} projects")
 
             # Обработать каждый проект
             for project in projects:
@@ -110,6 +114,9 @@ class SchedulerService:
                     continue
 
                 logger.info(f"Processing new project: {project.vitrina_id}")
+
+                # Сохранить teps из sidebar до перезаписи деталями
+                initial_teps = getattr(project, '_teps', None)
 
                 # Получить детали проекта
                 details = None
@@ -129,13 +136,27 @@ class SchedulerService:
                     project.category = details.get("category") or project.category
                     project.characteristics = details.get("characteristics")
 
+                # Если с полной страницы не пришли ТЭП — добавить из sidebar
+                teps = (details.get("teps") if details else None) or initial_teps
+                if teps and isinstance(project.characteristics, dict):
+                    # Слить teps в characteristics для сохранения в БД
+                    project.characteristics.update(teps)
+                elif teps and project.characteristics is None:
+                    project.characteristics = dict(teps)
+
                 # Сохранить в БД (теперь project заполнен)
                 self.repository.save_project(project)
 
                 # Отправить уведомление
                 message = format_project_notification(project, details)
-                await self.telegram.send_notification(message)
+                await self.telegram.send_notification(message, chat_ids)
                 notified_count += 1
+
+                # Отправить ТЭП файл если есть
+                if teps:
+                    file_content = format_teps_file(project, teps)
+                    filename = f"teps_{project.vitrina_id}.txt"
+                    await self.telegram.send_file(file_content, filename, chat_ids)
 
                 # Отметить как уведомленный
                 self.repository.mark_notified(project.vitrina_id)
@@ -149,7 +170,10 @@ class SchedulerService:
         except Exception as e:
             logger.error(f"Parser error: {e}", exc_info=True)
             self.repository.finish_run(run.id, "error", error_msg=str(e))
-            await self.telegram.send_alert(str(e))
+            # Получить чаты для отправки алерта
+            notification_chats = self.repository.get_notification_chats()
+            chat_ids = [chat.chat_id for chat in notification_chats] if notification_chats else None
+            await self.telegram.send_alert(str(e), chat_ids)
 
     async def run_immediately(self) -> None:
         """Запустить парсер немедленно (для команды /run_now)"""

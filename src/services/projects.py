@@ -47,7 +47,8 @@ JS_EXTRACT_BY_IDS = """
         developer: null,
         expertise_num: null,
         expertise_nums: [],
-        characteristics: {}
+        characteristics: {},
+        teps: {}
     };
 
     // Хелпер: получить текст из элемента
@@ -109,7 +110,7 @@ JS_EXTRACT_BY_IDS = """
 
     charFields.forEach(field => {
         const value = getText('#' + field);
-        if (value && value !== 'Сведения отсутствуют') {
+        if (value && value !== 'Сведения отсутствуют' && value !== 'Не выбрано') {
             result.characteristics[field] = value;
         }
     });
@@ -123,7 +124,8 @@ JS_EXTRACT_BY_IDS = """
             if (cells.length >= 2) {
                 const k = cells[0].innerText.trim();
                 const v = cells[1].innerText.trim();
-                if (k && v && v !== 'Сведения отсутствуют') {
+                if (k && v && v !== 'Сведения отсутствуют' && v !== 'Не выбрано') {
+                    result.teps[k] = v;
                     result.characteristics[k] = v;
                 }
             }
@@ -708,6 +710,12 @@ class ProjectsService:
         characteristics = {}
 
         for raw_label, value in raw_pairs.items():
+            value_stripped = value.strip()
+
+            # Фильтровать значения "Не выбрано" и аналогичные
+            if value_stripped in ("Не выбрано", "Сведения отсутствуют", "-", ""):
+                continue
+
             label_lower = raw_label.lower().strip()
             matched_field = None
 
@@ -723,9 +731,9 @@ class ProjectsService:
 
             if matched_field:
                 if matched_field not in result:  # не перезаписывать более конкретное
-                    result[matched_field] = value.strip()
+                    result[matched_field] = value_stripped
             else:
-                characteristics[raw_label] = value.strip()
+                characteristics[raw_label] = value_stripped
 
         result["characteristics"] = characteristics if characteristics else None
         return result
@@ -743,6 +751,14 @@ class ProjectsService:
                 if v and v != "Сведения отсутствуют"
             }
 
+        teps = {}
+        if data.get("teps"):
+            # Отфильтровать пустые значения
+            teps = {
+                k: v for k, v in data["teps"].items()
+                if v and v != "Сведения отсутствуют"
+            }
+
         return {
             "expertise_num": data.get("expertise_num"),
             "object_name": data.get("object_name"),
@@ -751,6 +767,7 @@ class ProjectsService:
             "category": data.get("category"),
             "vitrina_id": data.get("vitrina_id"),
             "characteristics": characteristics if characteristics else None,
+            "teps": teps if teps else None,
         }
 
     async def _parse_cards_from_search_page(self, page) -> List[Project]:
@@ -831,6 +848,8 @@ class ProjectsService:
                         characteristics=mapped_data.get("characteristics"),
                         url=f"{self.config.vitrina_url}/projects/{final_vitrina_id}",
                     )
+                    # Сохранить teps из sidebar как временный атрибут (fallback для полной страницы)
+                    project._teps = mapped_data.get("teps")
                     projects.append(project)
                     logger.debug(f"Card {i + 1} parsed: {project.vitrina_id} - {project.object_name}")
 

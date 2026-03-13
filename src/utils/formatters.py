@@ -5,7 +5,7 @@ from src.db.repository import Project
 
 
 def format_project_notification(project: Project, details: Optional[Dict] = None) -> str:
-    """Форматировать уведомление о новом проекте в HTML для Telegram (Вариант А)"""
+    """Форматировать уведомление о новом проекте в HTML для Telegram (только 5 основных полей)"""
 
     html = "🏗️ <b>Новый проект</b>\n\n"
 
@@ -23,21 +23,6 @@ def format_project_notification(project: Project, details: Optional[Dict] = None
 
     if project.tech_customer:
         html += f"🔧 <b>Технический заказчик:</b> {escape_html(project.tech_customer)}\n"
-
-    # Характеристики из деталей
-    if details and "characteristics" in details:
-        chars = details["characteristics"]
-        if isinstance(chars, dict) and chars:
-            html += "\n📊 <b>Характеристики:</b>\n"
-            for key, value in chars.items():
-                if not value:
-                    continue
-                value_str = str(value)
-                # Пропускать списки вариантов (мусор из radio/checkbox ячеек)
-                if '\n' in value_str or len(value_str) > 200:
-                    continue
-                label = format_characteristic_label(key)
-                html += f"• {label}: {escape_html(value_str)}\n"
 
     # Ссылка на проект
     if project.url:
@@ -160,6 +145,33 @@ def format_alert(error_message: str) -> str:
         f"🚨 <b>ОШИБКА ПАРСЕРА</b>\n\n"
         f"<code>{escape_html(error_message[:500])}</code>"
     )
+
+
+def format_teps_file(project: Project, teps: Dict) -> str:
+    """
+    Форматировать ТЭП (технико-экономические показатели) в текстовый файл.
+
+    Возвращает строку для сохранения в .txt файл.
+    """
+    lines = []
+
+    # Заголовок с основной информацией
+    if project.expertise_num:
+        lines.append(f"Номер экспертизы: {project.expertise_num}")
+    if project.object_name:
+        lines.append(f"Наименование объекта: {project.object_name}")
+    if project.url:
+        lines.append(f"Ссылка: {project.url}")
+
+    lines.append("")
+    lines.append("Технико-экономические показатели:")
+    lines.append("-" * 50)
+
+    # Добавить все ТЭП пары
+    for key, value in teps.items():
+        lines.append(f"{key}: {value}")
+
+    return "\n".join(lines)
 
 
 def escape_html(text: str) -> str:
