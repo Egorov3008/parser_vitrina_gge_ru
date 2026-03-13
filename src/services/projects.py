@@ -15,9 +15,14 @@ logger = get_logger()
 LABEL_MAPPING = {
     "номер экспертизы": "expertise_num",
     "№ экспертизы": "expertise_num",
+    "номер заключения": "expertise_num",
+    "регистрационный номер": "expertise_num",
+    "реестровый номер": "expertise_num",
     "экспертная организация": "expert_org",
     "орган экспертизы": "expert_org",
+    "организация": "expert_org",
     "застройщик": "developer",
+    "инвестор-застройщик": "developer",
     "технический заказчик": "tech_customer",
     "техзаказчик": "tech_customer",
     "регион": "region",
@@ -27,6 +32,7 @@ LABEL_MAPPING = {
     "наименование объекта": "object_name",
     "наименование": "object_name",
     "объект капитального строительства": "object_name",
+    "объект": "object_name",
 }
 
 # JS-код для извлечения всех пар лейбл-значение + секции характеристик
@@ -35,12 +41,19 @@ JS_EXTRACT_PAIRS = """
     const pairs = {};
     const charSection = {};
 
+    // Хелпер: клонировать элемент и удалить input/select перед чтением текста
+    const cleanText = el => {
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('input, select').forEach(i => i.remove());
+        return clone.innerText.trim();
+    };
+
     // Структура 1: таблицы <tr><td>Лейбл</td><td>Значение</td></tr>
     document.querySelectorAll('tr').forEach(tr => {
         const cells = tr.querySelectorAll('td, th');
         if (cells.length >= 2) {
-            const label = cells[0].innerText.trim();
-            const value = cells[1].innerText.trim();
+            const label = cleanText(cells[0]);
+            const value = cleanText(cells[1]);
             if (label && value && label.length < 150 && value.length < 300 && !value.includes('\\n'))
                 pairs[label] = value;
         }
@@ -51,8 +64,8 @@ JS_EXTRACT_PAIRS = """
         const items = dl.querySelectorAll('dt, dd');
         for (let i = 0; i < items.length - 1; i++) {
             if (items[i].tagName === 'DT' && items[i+1].tagName === 'DD') {
-                const label = items[i].innerText.trim();
-                const value = items[i+1].innerText.trim();
+                const label = cleanText(items[i]);
+                const value = cleanText(items[i+1]);
                 if (label && value && value.length < 300 && !value.includes('\\n')) pairs[label] = value;
             }
         }
@@ -63,8 +76,8 @@ JS_EXTRACT_PAIRS = """
         document.querySelectorAll(sel).forEach(labelEl => {
             const valueEl = labelEl.nextElementSibling;
             if (valueEl) {
-                const label = labelEl.innerText.trim();
-                const value = valueEl.innerText.trim();
+                const label = cleanText(labelEl);
+                const value = cleanText(valueEl);
                 if (label && value && label.length < 150 && value.length < 300 && !value.includes('\\n'))
                     pairs[label] = value;
             }
@@ -81,8 +94,8 @@ JS_EXTRACT_PAIRS = """
                 container.querySelectorAll('tr').forEach(tr => {
                     const cells = tr.querySelectorAll('td');
                     if (cells.length >= 2) {
-                        const k = cells[0].innerText.trim();
-                        const v = cells[1].innerText.trim();
+                        const k = cleanText(cells[0]);
+                        const v = cleanText(cells[1]);
                         if (k && v && v.length < 300 && !v.includes('\\n')) charSection[k] = v;
                     }
                 });
@@ -332,6 +345,10 @@ class ProjectsService:
             await self.session.page.wait_for_timeout(500)
 
             raw_data = await self.session.page.evaluate(JS_EXTRACT_PAIRS)
+
+            # DEBUG: показать все найденные лейблы
+            all_labels = list(raw_data.get("pairs", {}).keys())
+            logger.debug(f"Raw pairs from {project_url}: {all_labels}")
 
             if not raw_data.get("pairs"):
                 logger.warning(f"No label-value pairs found on {project_url}")
