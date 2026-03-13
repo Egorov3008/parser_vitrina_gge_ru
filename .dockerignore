@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+data/
+logs/
+.env
+.git
+*.md
+*.html
+*.png
+*.txt
+.qwen/

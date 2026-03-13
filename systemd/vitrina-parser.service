@@ -1,0 +1,17 @@
+[Unit]
+Description=Vitrina Parser - Investment Projects Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=claude
+WorkingDirectory=/home/claude/vitrina-parser
+Environment=PATH=/home/claude/vitrina-parser/venv/bin
+ExecStart=/home/claude/vitrina-parser/venv/bin/python -m src.main
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

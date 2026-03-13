@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  vitrina-parser:
+    build: .
+    container_name: vitrina-parser
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    environment:
+      - TZ=Asia/Yekaterinburg

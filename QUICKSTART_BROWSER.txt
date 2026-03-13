@@ -1,0 +1,35 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║  БЫСТРЫЙ СТАРТ: Установка зависимостей Playwright Chromium                 ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+ПРОБЛЕМА:
+  chrome-headless-shell: error while loading shared libraries: libnspr4.so
+
+РЕШЕНИЕ (выберите один из вариантов):
+
+1️⃣  АВТОМАТИЧЕСКИ (рекомендуется):
+   $ chmod +x install_browser_deps.sh
+   $ sudo bash install_browser_deps.sh
+
+2️⃣  ВРУЧНУЮ:
+   $ sudo apt-get update
+   $ sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+       libcups2 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+       libxkbcommon0 libasound2
+
+3️⃣  ЧЕРЕЗ PLAYWRIGHT (в интерактивном терминале):
+   $ source venv/bin/activate
+   $ playwright install-deps chromium
+
+ПРОВЕРКА:
+   $ source venv/bin/activate
+   $ python -m src.main
+
+ДОКУМЕНТАЦИЯ:
+   📖 BROWSER_SETUP.md              - Полное руководство
+   📖 IMPLEMENTATION_SUMMARY.md     - Подробный отчет
+   📖 README.md                     - Основная документация
+
+────────────────────────────────────────────────────────────────────────────
+Нужна помощь? Смотрите BROWSER_SETUP.md или IMPLEMENTATION_SUMMARY.md
+────────────────────────────────────────────────────────────────────────────
