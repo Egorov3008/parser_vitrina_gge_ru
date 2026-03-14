@@ -280,7 +280,7 @@ async def add_admin_command(message: Message) -> None:
     args = message.text.split()[1:] if message.text else []
     if not args:
         await message.answer(
-            "Использование: /add_admin <telegram_id> [telegram_id2, ...]\n\n"
+            "Использование: /add_admin &lt;telegram_id&gt; [telegram_id2, ...]\n\n"
             f"Ваш ID: <code>{user_id}</code>\n\n"
             "Можно добавить несколько ID через запятую.",
             parse_mode=ParseMode.HTML
