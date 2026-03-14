@@ -220,7 +220,7 @@ class AdminPanelService:
 
         settings = self.repo.get_all_settings()
         text, keyboard = self._build_admin_menu_content(settings)
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def handle_callback(self, callback: CallbackQuery, state: FSMContext):
@@ -334,7 +334,7 @@ class AdminPanelService:
         keyboard.append([InlineKeyboardButton(text="🔄 Сбросить категории", callback_data=CALLBACK_CATEGORIES_RESET)])
         keyboard.append([InlineKeyboardButton(text="✅ Готово", callback_data=CALLBACK_BACK)])
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def _handle_category_toggle(self, callback: CallbackQuery, cat_index: int):
@@ -395,7 +395,7 @@ class AdminPanelService:
         keyboard.append([InlineKeyboardButton(text="🔄 Сбросить регионы", callback_data=CALLBACK_REGIONS_RESET)])
         keyboard.append([InlineKeyboardButton(text="✅ Готово", callback_data=CALLBACK_BACK)])
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def _handle_region_toggle(self, callback: CallbackQuery, region_index: int):
@@ -451,7 +451,7 @@ class AdminPanelService:
             [InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)],
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def _show_year_selector(self, callback: CallbackQuery, year_type: str):
@@ -474,7 +474,7 @@ class AdminPanelService:
 
         keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_EXPERTISE_YEAR)])
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def _set_expertise_year(self, callback: CallbackQuery, year_type: str, year: int):
@@ -500,7 +500,7 @@ class AdminPanelService:
             "Будут показаны все проекты независимо от года.\n\n"
             "Нажмите ◀️ Назад для продолжения.",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
+                inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
             ),
             parse_mode="HTML",
         )
@@ -537,7 +537,7 @@ class AdminPanelService:
         )
 
         keyboard = [[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
         await state.set_state(AdminFSM.waiting_schedule)
@@ -572,7 +572,7 @@ class AdminPanelService:
                     ]
                 )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def _add_admin(self, callback: CallbackQuery, telegram_id: str):
@@ -634,7 +634,7 @@ class AdminPanelService:
                     ]
                 )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
         await state.set_state(AdminFSM.waiting_chat_id)
 
@@ -709,7 +709,7 @@ class AdminPanelService:
         """Показать меню админ-панели из callback query"""
         settings = self.repo.get_all_settings()
         text, keyboard = self._build_admin_menu_content(settings)
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def _save_settings(self, callback: CallbackQuery):
@@ -798,7 +798,7 @@ class AdminPanelService:
             ]
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
     async def _perform_clear_data(self, callback: CallbackQuery):
@@ -814,7 +814,7 @@ class AdminPanelService:
             )
 
             keyboard = [[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
             await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
             logger.info(f"Data cleared by admin {callback.from_user.id}: {result['projects_deleted']} projects, {result['logs_deleted']} logs")

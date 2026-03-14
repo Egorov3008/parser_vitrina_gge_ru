@@ -71,7 +71,8 @@ async def start_command(message: Message) -> None:
             InlineKeyboardButton(text="❓ Справка", callback_data="cmd_help"),
         ],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+    
 
     await message.reply_html(text, reply_markup=reply_markup)
 
@@ -103,7 +104,7 @@ async def status_command(message: Message) -> None:
         text = "ℹ️ Запусков ещё не было"
 
     keyboard = [[InlineKeyboardButton(text="🚀 Запустить сейчас", callback_data="cmd_run_now")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     await message.reply_html(text, reply_markup=reply_markup)
 
@@ -120,7 +121,7 @@ async def run_now_command(message: Message) -> None:
     # Отправляем сообщение о запуске
     text = "⏳ <b>Запуск парсера...</b>"
     keyboard = [[InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     msg = await message.reply_html(text, reply_markup=reply_markup)
 
@@ -130,12 +131,12 @@ async def run_now_command(message: Message) -> None:
         text = "✅ <b>Парсер завершил работу!</b>\n\n"
         text += "Используйте /status для просмотра результатов."
         keyboard = [[InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await msg.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
     except Exception as e:
         text = f"❌ <b>Ошибка при запуске:</b>\n<code>{str(e)[:200]}</code>"
         keyboard = [[InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="cmd_run_now")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await msg.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 
@@ -168,7 +169,7 @@ async def stats_command(message: Message) -> None:
         [InlineKeyboardButton(text="🚀 Запустить парсер", callback_data="cmd_run_now")],
         [InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status")],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     await message.reply_html(text, reply_markup=reply_markup)
 
@@ -222,7 +223,7 @@ async def help_command(message: Message) -> None:
             InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="cmd_admin"),
         ],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     await message.reply_html(text, reply_markup=reply_markup)
 
