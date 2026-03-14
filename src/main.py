@@ -60,15 +60,15 @@ async def start_command(message: Message) -> None:
 
     keyboard = [
         [
-            InlineKeyboardButton("📊 Статус", callback_data="cmd_status"),
-            InlineKeyboardButton("🚀 Запустить", callback_data="cmd_run_now"),
+            InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status"),
+            InlineKeyboardButton(text="🚀 Запустить", callback_data="cmd_run_now"),
         ],
         [
-            InlineKeyboardButton("📈 Статистика", callback_data="cmd_stats"),
-            InlineKeyboardButton("⚙️ Админ-панель", callback_data="cmd_admin"),
+            InlineKeyboardButton(text="📈 Статистика", callback_data="cmd_stats"),
+            InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="cmd_admin"),
         ],
         [
-            InlineKeyboardButton("❓ Справка", callback_data="cmd_help"),
+            InlineKeyboardButton(text="❓ Справка", callback_data="cmd_help"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -102,7 +102,7 @@ async def status_command(message: Message) -> None:
     else:
         text = "ℹ️ Запусков ещё не было"
 
-    keyboard = [[InlineKeyboardButton("🚀 Запустить сейчас", callback_data="cmd_run_now")]]
+    keyboard = [[InlineKeyboardButton(text="🚀 Запустить сейчас", callback_data="cmd_run_now")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await message.reply_html(text, reply_markup=reply_markup)
@@ -119,7 +119,7 @@ async def run_now_command(message: Message) -> None:
 
     # Отправляем сообщение о запуске
     text = "⏳ <b>Запуск парсера...</b>"
-    keyboard = [[InlineKeyboardButton("📊 Статус", callback_data="cmd_status")]]
+    keyboard = [[InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     msg = await message.reply_html(text, reply_markup=reply_markup)
@@ -129,12 +129,12 @@ async def run_now_command(message: Message) -> None:
         await scheduler.run_immediately()
         text = "✅ <b>Парсер завершил работу!</b>\n\n"
         text += "Используйте /status для просмотра результатов."
-        keyboard = [[InlineKeyboardButton("📊 Статус", callback_data="cmd_status")]]
+        keyboard = [[InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await msg.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
     except Exception as e:
         text = f"❌ <b>Ошибка при запуске:</b>\n<code>{str(e)[:200]}</code>"
-        keyboard = [[InlineKeyboardButton("🔄 Попробовать снова", callback_data="cmd_run_now")]]
+        keyboard = [[InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="cmd_run_now")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await msg.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
@@ -165,8 +165,8 @@ async def stats_command(message: Message) -> None:
             text += f"• {err.get('started_at', 'N/A')}: {err_msg}\n"
 
     keyboard = [
-        [InlineKeyboardButton("🚀 Запустить парсер", callback_data="cmd_run_now")],
-        [InlineKeyboardButton("📊 Статус", callback_data="cmd_status")],
+        [InlineKeyboardButton(text="🚀 Запустить парсер", callback_data="cmd_run_now")],
+        [InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -214,12 +214,12 @@ async def help_command(message: Message) -> None:
 
     keyboard = [
         [
-            InlineKeyboardButton("📊 Статус", callback_data="cmd_status"),
-            InlineKeyboardButton("🚀 Запустить", callback_data="cmd_run_now"),
+            InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status"),
+            InlineKeyboardButton(text="🚀 Запустить", callback_data="cmd_run_now"),
         ],
         [
-            InlineKeyboardButton("📈 Статистика", callback_data="cmd_stats"),
-            InlineKeyboardButton("⚙️ Админ-панель", callback_data="cmd_admin"),
+            InlineKeyboardButton(text="📈 Статистика", callback_data="cmd_stats"),
+            InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="cmd_admin"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)

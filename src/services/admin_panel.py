@@ -324,15 +324,15 @@ class AdminPanelService:
         # Кнопки навигации
         nav_row = []
         if page > 0:
-            nav_row.append(InlineKeyboardButton("◀️ Назад", callback_data=f"catpage:{page-1}"))
+            nav_row.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"catpage:{page-1}"))
         if end_idx < len(self.ALL_CATEGORIES):
-            nav_row.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"catpage:{page+1}"))
+            nav_row.append(InlineKeyboardButton(text="Вперёд ▶️", callback_data=f"catpage:{page+1}"))
 
         if nav_row:
             keyboard.append(nav_row)
 
-        keyboard.append([InlineKeyboardButton("🔄 Сбросить категории", callback_data=CALLBACK_CATEGORIES_RESET)])
-        keyboard.append([InlineKeyboardButton("✅ Готово", callback_data=CALLBACK_BACK)])
+        keyboard.append([InlineKeyboardButton(text="🔄 Сбросить категории", callback_data=CALLBACK_CATEGORIES_RESET)])
+        keyboard.append([InlineKeyboardButton(text="✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -385,15 +385,15 @@ class AdminPanelService:
         # Кнопки навигации
         nav_row = []
         if page > 0:
-            nav_row.append(InlineKeyboardButton("◀️ Назад", callback_data=f"regpage:{page-1}"))
+            nav_row.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"regpage:{page-1}"))
         if end_idx < len(self.ALL_REGIONS):
-            nav_row.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"regpage:{page+1}"))
+            nav_row.append(InlineKeyboardButton(text="Вперёд ▶️", callback_data=f"regpage:{page+1}"))
 
         if nav_row:
             keyboard.append(nav_row)
 
-        keyboard.append([InlineKeyboardButton("🔄 Сбросить регионы", callback_data=CALLBACK_REGIONS_RESET)])
-        keyboard.append([InlineKeyboardButton("✅ Готово", callback_data=CALLBACK_BACK)])
+        keyboard.append([InlineKeyboardButton(text="🔄 Сбросить регионы", callback_data=CALLBACK_REGIONS_RESET)])
+        keyboard.append([InlineKeyboardButton(text="✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -446,9 +446,9 @@ class AdminPanelService:
                 ),
             ],
             [
-                InlineKeyboardButton("🔄 Сбросить", callback_data="expertise_year_reset"),
+                InlineKeyboardButton(text="🔄 Сбросить", callback_data="expertise_year_reset"),
             ],
-            [InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)],
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -472,7 +472,7 @@ class AdminPanelService:
         if row:
             keyboard.append(row)
 
-        keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_EXPERTISE_YEAR)])
+        keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_EXPERTISE_YEAR)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -500,7 +500,7 @@ class AdminPanelService:
             "Будут показаны все проекты независимо от года.\n\n"
             "Нажмите ◀️ Назад для продолжения.",
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)]]
+                [[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
             ),
             parse_mode="HTML",
         )
@@ -536,7 +536,7 @@ class AdminPanelService:
             "Отправьте новое расписание сообщением:"
         )
 
-        keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)]]
+        keyboard = [[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
@@ -558,7 +558,7 @@ class AdminPanelService:
         text += "\nДля добавления отправьте Telegram ID пользователя."
 
         keyboard = [
-            [InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)],
         ]
 
         if admins:
@@ -619,7 +619,7 @@ class AdminPanelService:
         )
 
         keyboard = [
-            [InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)],
         ]
 
         if chats:
@@ -686,20 +686,20 @@ class AdminPanelService:
 
         keyboard = [
             [
-                InlineKeyboardButton("📁 Категории", callback_data=CALLBACK_CATEGORIES),
-                InlineKeyboardButton("📍 Регионы", callback_data=CALLBACK_REGIONS),
+                InlineKeyboardButton(text="📁 Категории", callback_data=CALLBACK_CATEGORIES),
+                InlineKeyboardButton(text="📍 Регионы", callback_data=CALLBACK_REGIONS),
             ],
             [
-                InlineKeyboardButton("📅 Год экспертизы", callback_data=CALLBACK_EXPERTISE_YEAR),
-                InlineKeyboardButton("⏰ Расписание", callback_data=CALLBACK_SCHEDULE),
+                InlineKeyboardButton(text="📅 Год экспертизы", callback_data=CALLBACK_EXPERTISE_YEAR),
+                InlineKeyboardButton(text="⏰ Расписание", callback_data=CALLBACK_SCHEDULE),
             ],
             [
-                InlineKeyboardButton("👥 Админы", callback_data=CALLBACK_ADMINS),
-                InlineKeyboardButton("📱 Чаты", callback_data=CALLBACK_NOTIFICATION_CHATS),
+                InlineKeyboardButton(text="👥 Админы", callback_data=CALLBACK_ADMINS),
+                InlineKeyboardButton(text="📱 Чаты", callback_data=CALLBACK_NOTIFICATION_CHATS),
             ],
             [
-                InlineKeyboardButton("💾 Экспорт в .txt", callback_data=CALLBACK_EXPORT),
-                InlineKeyboardButton("🗑️ Очистить данные", callback_data=CALLBACK_CLEAR_DATA),
+                InlineKeyboardButton(text="💾 Экспорт в .txt", callback_data=CALLBACK_EXPORT),
+                InlineKeyboardButton(text="🗑️ Очистить данные", callback_data=CALLBACK_CLEAR_DATA),
             ],
         ]
 
@@ -793,8 +793,8 @@ class AdminPanelService:
 
         keyboard = [
             [
-                InlineKeyboardButton("✅ Да, удалить", callback_data=CALLBACK_CLEAR_DATA_CONFIRM),
-                InlineKeyboardButton("❌ Отмена", callback_data=CALLBACK_BACK),
+                InlineKeyboardButton(text="✅ Да, удалить", callback_data=CALLBACK_CLEAR_DATA_CONFIRM),
+                InlineKeyboardButton(text="❌ Отмена", callback_data=CALLBACK_BACK),
             ]
         ]
 
@@ -813,7 +813,7 @@ class AdminPanelService:
                 "Парсер готов к новому запуску."
             )
 
-            keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)]]
+            keyboard = [[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
