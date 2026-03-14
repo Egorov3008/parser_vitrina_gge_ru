@@ -441,11 +441,11 @@ class AdminPanelService:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    f"🔽 От года: {year_from or 'не задан'}",
+                    text=f"🔽 От года: {year_from or 'не задан'}",
                     callback_data=CALLBACK_EXPERTISE_YEAR_FROM
                 ),
                 InlineKeyboardButton(
-                    f"🔼 До года: {year_to or 'не задан'}",
+                    text=f"🔼 До года: {year_to or 'не задан'}",
                     callback_data=CALLBACK_EXPERTISE_YEAR_TO
                 ),
             ],
@@ -469,7 +469,7 @@ class AdminPanelService:
         keyboard = []
         row = []
         for year in reversed(years):  # От новых к старым
-            row.append(InlineKeyboardButton(str(year), callback_data=f"expertise_year_set:{year_type}:{year}"))
+            row.append(InlineKeyboardButton(text=str(year), callback_data=f"expertise_year_set:{year_type}:{year}"))
             if len(row) == 3:
                 keyboard.append(row)
                 row = []
@@ -570,7 +570,7 @@ class AdminPanelService:
                 keyboard.append(
                     [
                         InlineKeyboardButton(
-                            f"❌ {admin.username or admin.telegram_id}",
+                            text=f"❌ {admin.username or admin.telegram_id}",
                             callback_data=f"{CALLBACK_REMOVE_ADMIN}:{admin.telegram_id}",
                         )
                     ]
@@ -632,7 +632,7 @@ class AdminPanelService:
                 keyboard.append(
                     [
                         InlineKeyboardButton(
-                            f"❌ {chat_display}",
+                            text=f"❌ {chat_display}",
                             callback_data=f"{CALLBACK_REMOVE_CHAT}:{chat.chat_id}",
                         )
                     ]
