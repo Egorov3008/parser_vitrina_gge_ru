@@ -322,7 +322,7 @@ class AdminPanelService:
             # Сокращаем название для кнопки
             short_name = cat[:30] + "..." if len(cat) > 30 else cat
             keyboard.append(
-                [InlineKeyboardButton(f"{emoji} {short_name}", callback_data=f"cat:{i}")]
+                [InlineKeyboardButton(text=f"{emoji} {short_name}", callback_data=f"cat:{i}")]
             )
 
         # Кнопки навигации
@@ -383,7 +383,7 @@ class AdminPanelService:
             is_selected = region in selected
             emoji = "✅" if is_selected else "⬜"
             keyboard.append(
-                [InlineKeyboardButton(f"{emoji} {region}", callback_data=f"reg:{i}")]
+                [InlineKeyboardButton(text=f"{emoji} {region}", callback_data=f"reg:{i}")]
             )
 
         # Кнопки навигации
