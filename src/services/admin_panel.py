@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 
 from aiogram import Router, F
+from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -212,16 +213,17 @@ class AdminPanelService:
         user_id = message.from_user.id
 
         if not self._check_admin(user_id):
-            await message.reply_text(
+            await message.answer(
                 "❌ У вас нет прав администратора.\n\n"
-                "Обратитесь к текущему администратору для добавления."
+                "Обратитесь к текущему администратору для добавления.",
+                parse_mode=ParseMode.HTML
             )
             return
 
         settings = self.repo.get_all_settings()
         text, keyboard = self._build_admin_menu_content(settings)
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await message.answer(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def handle_callback(self, callback: CallbackQuery, state: FSMContext):
         """Обработка callback запросов от кнопок"""
@@ -335,7 +337,7 @@ class AdminPanelService:
         keyboard.append([InlineKeyboardButton(text="✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def _handle_category_toggle(self, callback: CallbackQuery, cat_index: int):
         """Переключить категорию по индексу"""
@@ -396,7 +398,7 @@ class AdminPanelService:
         keyboard.append([InlineKeyboardButton(text="✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def _handle_region_toggle(self, callback: CallbackQuery, region_index: int):
         """Переключить регион по индексу"""
@@ -452,7 +454,7 @@ class AdminPanelService:
         ]
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def _show_year_selector(self, callback: CallbackQuery, year_type: str):
         """Меню выбора конкретного года"""
@@ -475,7 +477,7 @@ class AdminPanelService:
         keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_EXPERTISE_YEAR)])
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def _set_expertise_year(self, callback: CallbackQuery, year_type: str, year: int):
         """Установить год экспертизы"""
@@ -502,7 +504,7 @@ class AdminPanelService:
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
             ),
-            parse_mode="HTML",
+            parse_mode=ParseMode.HTML,
         )
 
     async def _reset_categories(self, callback: CallbackQuery):
@@ -539,7 +541,7 @@ class AdminPanelService:
         keyboard = [[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
         await state.set_state(AdminFSM.waiting_schedule)
 
     async def _show_admins_menu(self, callback: CallbackQuery):
@@ -573,7 +575,7 @@ class AdminPanelService:
                 )
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def _add_admin(self, callback: CallbackQuery, telegram_id: str):
         """Добавить администратора"""
@@ -635,7 +637,7 @@ class AdminPanelService:
                 )
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
         await state.set_state(AdminFSM.waiting_chat_id)
 
     async def _remove_chat(self, callback: CallbackQuery, state: FSMContext, chat_id: str):
@@ -710,7 +712,7 @@ class AdminPanelService:
         settings = self.repo.get_all_settings()
         text, keyboard = self._build_admin_menu_content(settings)
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def _save_settings(self, callback: CallbackQuery):
         """Сохранить настройки"""
@@ -729,10 +731,10 @@ class AdminPanelService:
         # Простая валидация cron (5 полей)
         parts = new_schedule.split()
         if len(parts) != 5:
-            await message.reply_text(
+            await message.answer(
                 "❌ Неверный формат cron. Должно быть 5 полей.\n"
                 "Пример: <code>0 6 * * *</code>",
-                parse_mode="HTML",
+                parse_mode=ParseMode.HTML,
             )
             return
 
@@ -742,9 +744,9 @@ class AdminPanelService:
 
         await state.clear()
 
-        await message.reply_text(
+        await message.answer(
             f"✅ Расписание обновлено: <code>{new_schedule}</code>",
-            parse_mode="HTML",
+            parse_mode=ParseMode.HTML,
         )
 
     async def _handle_chat_id_text(self, message: Message, state: FSMContext):
@@ -761,10 +763,10 @@ class AdminPanelService:
             # ID могут быть отрицательными (группы) или положительными (личные чаты)
             int(chat_id_input)
         except ValueError:
-            await message.reply_text(
+            await message.answer(
                 "❌ Неверный ID чата. Должно быть число.\n"
                 "Пример: <code>123456789</code> или <code>-1001234567890</code>",
-                parse_mode="HTML",
+                parse_mode=ParseMode.HTML,
             )
             return
 
@@ -773,9 +775,9 @@ class AdminPanelService:
 
         await state.clear()
 
-        await message.reply_text(
+        await message.answer(
             f"✅ Чат {chat_id_input} добавлен для отправки уведомлений",
-            parse_mode="HTML",
+            parse_mode=ParseMode.HTML,
         )
 
     async def _show_clear_data_confirmation(self, callback: CallbackQuery):
@@ -799,7 +801,7 @@ class AdminPanelService:
         ]
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def _perform_clear_data(self, callback: CallbackQuery):
         """Выполнить очистку данных"""
@@ -816,7 +818,7 @@ class AdminPanelService:
             keyboard = [[InlineKeyboardButton(text="◀️ Назад", callback_data=CALLBACK_BACK)]]
             reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-            await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+            await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
             logger.info(f"Data cleared by admin {callback.from_user.id}: {result['projects_deleted']} projects, {result['logs_deleted']} logs")
 
         except Exception as e:

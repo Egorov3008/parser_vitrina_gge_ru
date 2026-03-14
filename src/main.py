@@ -74,7 +74,7 @@ async def start_command(message: Message) -> None:
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
     
 
-    await message.reply_html(text, reply_markup=reply_markup)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
 async def status_command(message: Message) -> None:
@@ -106,7 +106,7 @@ async def status_command(message: Message) -> None:
     keyboard = [[InlineKeyboardButton(text="🚀 Запустить сейчас", callback_data="cmd_run_now")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-    await message.reply_html(text, reply_markup=reply_markup)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
 async def run_now_command(message: Message) -> None:
@@ -123,7 +123,7 @@ async def run_now_command(message: Message) -> None:
     keyboard = [[InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-    msg = await message.reply_html(text, reply_markup=reply_markup)
+    msg = await message.answer(text, reply_markup=reply_markup)
 
     # Запускаем парсер
     try:
@@ -171,7 +171,7 @@ async def stats_command(message: Message) -> None:
     ]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-    await message.reply_html(text, reply_markup=reply_markup)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
 async def help_command(message: Message) -> None:
@@ -225,7 +225,7 @@ async def help_command(message: Message) -> None:
     ]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-    await message.reply_html(text, reply_markup=reply_markup)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
 async def admin_command(message: Message, state: FSMContext) -> None:
@@ -252,7 +252,7 @@ async def admin_command(message: Message, state: FSMContext) -> None:
             "Или попросите текущего администратора\n"
             "добавить вас через /add_admin"
         )
-        await message.reply_html(text)
+        await message.answer(text, parse_mode=ParseMode.HTML)
         return
 
     await admin_panel.show_admin_menu(message, state)
@@ -269,19 +269,21 @@ async def add_admin_command(message: Message) -> None:
     # Проверка: только админ может добавлять других
     repo = Repository(Database(get_config().db_path))
     if not repo.is_admin(user_id):
-        await message.reply_html(
+        await message.answer(
             "❌ Только администратор может добавлять других.\n\n"
             f"Ваш ID: <code>{user_id}</code>\n"
-            "Добавьте себя в ADMIN_ID в .env файле."
+            "Добавьте себя в ADMIN_ID в .env файле.",
+            parse_mode=ParseMode.HTML
         )
         return
 
     args = message.text.split()[1:] if message.text else []
     if not args:
-        await message.reply_html(
+        await message.answer(
             "Использование: /add_admin <telegram_id> [telegram_id2, ...]\n\n"
             f"Ваш ID: <code>{user_id}</code>\n\n"
-            "Можно добавить несколько ID через запятую."
+            "Можно добавить несколько ID через запятую.",
+            parse_mode=ParseMode.HTML
         )
         return
 
@@ -328,7 +330,7 @@ async def get_chat_id_command(message: Message) -> None:
         "✅ Чат будет добавлен и будет получать уведомления!"
     )
 
-    await message.reply_html(text)
+    await message.answer(text)
 
 
 # ============== Callback Handlers ==============
