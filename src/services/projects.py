@@ -234,23 +234,15 @@ class ProjectsService:
         self, limit: int = 100,
         categories: Optional[List[str]] = None,
         regions: Optional[List[str]] = None,
-        year_from: Optional[int] = None,
-        year_to: Optional[int] = None,
+        max_cards: int = 0,
     ) -> List[Project]:
         """
-        Получить список проектов с применением фильтров.
+        Получить список проектов с применением серверных фильтров (категория, регион).
 
-        Если указан диапазон лет (year_from/year_to), использует браузерный поиск
-        для фильтрации на стороне сервера. Иначе попытается использовать API.
+        Фильтрация по году экспертизы выполняется клиентски через filter_by_expertise_year().
         """
         effective_categories = categories if categories is not None else self.config.filter_categories
         effective_regions = regions if regions is not None else self.config.filter_regions
-
-        # Если задан диапазон лет, использовать браузерный поиск с фильтрацией
-        if year_from or year_to:
-            return await self._fetch_with_year_range(
-                limit, effective_categories, effective_regions, year_from, year_to
-            )
 
         try:
             # Попробовать получить через API
@@ -260,9 +252,9 @@ class ProjectsService:
         except Exception as e:
             logger.warning(f"API fetch failed: {e}, falling back to browser search")
 
-        # Fallback на браузерный поиск (без фильтра по году)
+        # Fallback на браузерный поиск
         return await self._fetch_via_browser_search(
-            effective_categories, effective_regions, year=None, limit=limit
+            effective_categories, effective_regions, limit=limit, max_cards=max_cards
         )
 
     async def _fetch_via_api(
@@ -425,49 +417,12 @@ class ProjectsService:
 
         return projects
 
-    async def _fetch_with_year_range(
-        self, limit: int,
-        categories: Optional[List[str]],
-        regions: Optional[List[str]],
-        year_from: Optional[int],
-        year_to: Optional[int],
-    ) -> List[Project]:
-        """
-        Получить проекты для диапазона лет через браузерный поиск.
-
-        Если указан диапазон лет, запрашивает каждый год отдельно и объединяет результаты.
-        """
-        all_projects = {}  # dict для дедупликации по vitrina_id
-
-        # Определить диапазон лет
-        year_from = year_from or 2000
-        year_to = year_to or datetime.now().year
-
-        logger.info(f"Fetching projects for years {year_from}-{year_to}")
-
-        # Для каждого года отправить отдельный запрос
-        for year in range(year_from, year_to + 1):
-            logger.info(f"Fetching projects for year {year}")
-            try:
-                projects = await self._fetch_via_browser_search(
-                    categories, regions, year=year, limit=limit
-                )
-                for project in projects:
-                    all_projects[project.vitrina_id] = project
-            except Exception as e:
-                logger.error(f"Error fetching projects for year {year}: {e}")
-                continue
-
-        result = list(all_projects.values())
-        logger.info(f"Total projects fetched for years {year_from}-{year_to}: {len(result)}")
-        return result
-
     async def _fetch_via_browser_search(
         self,
         categories: Optional[List[str]],
         regions: Optional[List[str]],
-        year: Optional[int],
         limit: int = 100,
+        max_cards: int = 0,
     ) -> List[Project]:
         """
         Получить проекты через браузерный поиск с парсингом карточек.
@@ -476,7 +431,7 @@ class ProjectsService:
         Каждую карточку кликают, открывается sidebar с деталями (#object-* элементы),
         извлекаются данные и sidebar закрывается.
         """
-        logger.info(f"Fetching projects via browser search (year={year}, categories={categories}, regions={regions})")
+        logger.info(f"Fetching projects via browser search (categories={categories}, regions={regions})")
 
         await self.session.ensure_logged_in()
         page = self.session.page
@@ -514,22 +469,19 @@ class ProjectsService:
             if "/projects" not in current_url:
                 logger.warning(f"Expected /projects page but got: {current_url}")
 
-            # Установить фильтры через JS
+            # Установить фильтры через ID элементов
             if categories:
                 logger.debug(f"Setting category filter: {categories}")
-                await self._set_slimselect_filter(page, "Категория", categories)
+                await self._set_filter_by_select_id(page, "filter-function-select-id", categories)
             if regions:
                 logger.debug(f"Setting region filter: {regions}")
-                await self._set_slimselect_filter(page, "Регион", regions)
-            if year:
-                logger.debug(f"Setting expertise year: {year}")
-                await self._set_expertise_year_input(page, year)
+                await self._set_filter_by_select_id(page, "filter-region-select-id", regions)
 
             # Отправить форму
             await self._submit_search_form(page)
 
             # Парсить карточки из результатов поиска
-            projects = await self._parse_cards_from_search_page(page)
+            projects = await self._parse_cards_from_search_page(page, max_cards=max_cards)
             logger.info(f"Fetched {len(projects)} projects via browser search")
             return projects
 
@@ -537,172 +489,115 @@ class ProjectsService:
             logger.error(f"Browser search error: {e}")
             return []
 
-    async def _set_slimselect_filter(
-        self, page, filter_name: str, values: List[str]
+    async def _set_filter_by_select_id(
+        self, page, select_id: str, values: List[str]
     ) -> None:
         """
-        Установить фильтр SlimSelect по текстовому поиску (по имени и значениям).
+        Установить фильтр SlimSelect по ID базового <select> элемента.
 
-        Алгоритм:
-        1. Найти .ss-main содержащий текст filter_name (например "Категория" или "Регион")
-        2. Кликнуть на него чтобы открыть дропдаун
-        3. Для каждого значения найти .ss-option по тексту и кликнуть
+        Использует Playwright .click() вместо JS evaluate для корректной
+        эмуляции пользовательских кликов (mousedown → mouseup → click),
+        что необходимо для активации обработчиков SlimSelect.
         """
-        logger.debug(f"Setting {filter_name} filter: {values}")
+        logger.debug(f"Setting filter by select #{select_id}: {values}")
 
         try:
-            # Найти и кликнуть нужный SS дропдаун по тексту filter_name
-            await page.evaluate(f"""
+            # Найти SlimSelect .ss-main через JS — он может быть на любом уровне DOM
+            # SlimSelect хранит ссылку на экземпляр в свойстве .slim оригинального <select>
+            ss_main_handle = await page.evaluate_handle(f"""
                 () => {{
-                    const keyword = '{filter_name}'.toLowerCase();
-                    const mains = document.querySelectorAll('.ss-main');
-                    for (const main of mains) {{
-                        const text = main.textContent.toLowerCase();
-                        if (text.includes(keyword)) {{
-                            main.click();
-                            break;
-                        }}
+                    const select = document.querySelector('#{select_id}');
+                    if (!select) return null;
+                    // Вариант 1: .ss-main как sibling <select> в родителе
+                    const parent = select.parentElement;
+                    if (parent) {{
+                        const ssMain = parent.querySelector('.ss-main');
+                        if (ssMain) return ssMain;
                     }}
+                    // Вариант 2: SlimSelect хранит data-id, ищем по нему
+                    const ssId = select.dataset.ssid || select.id;
+                    const allMains = document.querySelectorAll('.ss-main');
+                    for (const m of allMains) {{
+                        // Проверяем что .ss-main следует сразу за нашим select
+                        if (m.previousElementSibling === select) return m;
+                    }}
+                    // Вариант 3: вернуть первый найденный в родителе
+                    return null;
                 }}
             """)
+
+            # Преобразовать JSHandle в ElementHandle
+            ss_main_el = ss_main_handle.as_element()
+            if not ss_main_el:
+                logger.warning(f"Could not find SlimSelect .ss-main for #{select_id}")
+                return
+
+            # Открыть дропдаун реальным кликом Playwright
+            await ss_main_el.click()
             await page.wait_for_timeout(500)
+
+            # Проверить что дропдаун открылся — ищем .ss-content.ss-open глобально
+            ss_content_open = page.locator('.ss-content.ss-open')
+            if await ss_content_open.count() == 0:
+                # Попробовать ещё раз: иногда класс ss-open-below / ss-open-above
+                ss_content_open = page.locator('.ss-content.ss-open-below, .ss-content.ss-open-above')
+
+            if await ss_content_open.count() == 0:
+                logger.warning(f"SlimSelect dropdown did not open for #{select_id}, trying click again")
+                await ss_main_el.click()
+                await page.wait_for_timeout(800)
 
             # Кликнуть каждую нужную опцию по тексту
             for value in values:
-                # Экранируем кавычки в названии
-                safe_value = value.replace("'", "\\'")
-                await page.evaluate(f"""
-                    () => {{
-                        const options = document.querySelectorAll('.ss-option');
-                        for (const opt of options) {{
-                            const text = opt.textContent.trim();
-                            if (text.includes('{safe_value}')) {{
-                                opt.click();
-                                break;
-                            }}
-                        }}
-                    }}
-                """)
-                await page.wait_for_timeout(100)
+                # Искать опции внутри видимого дропдауна
+                option = page.locator('.ss-option:not(.ss-disabled)').filter(has_text=value)
+                option_count = await option.count()
 
-        except Exception as e:
-            logger.warning(f"Error setting {filter_name} filter: {e}")
-
-    async def _set_expertise_year_input(self, page, year: int) -> None:
-        """
-        Заполнить поле "Номер заключения экспертизы:" (год в формате ХХХХ).
-        Это поле используется для фильтрации по году экспертизы.
-        """
-        logger.debug(f"Setting expertise year: {year}")
-
-        try:
-            await page.evaluate(f"""
-                (year) => {{
-                    // Поиск input элемента для поля года
-                    // Ищем по разным селекторам, которые могут быть на странице
-                    const selectors = [
-                        'input[name*="year"]',
-                        'input[name*="expertise"]',
-                        'input[name*="number"]',
-                        'input[placeholder*="202"]',  // Примерный год
-                        'input[id*="year"]',
-                        'input[id*="expertise"]',
-                    ];
-
-                    let found = false;
-                    for (const selector of selectors) {{
-                        const input = document.querySelector(selector);
-                        if (input) {{
-                            input.value = String(year);
-                            input.dispatchEvent(new Event('input', {{bubbles: true}}));
-                            input.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            found = true;
-                            break;
-                        }}
-                    }}
-
-                    // Fallback: ищем по label текстов
-                    if (!found) {{
-                        const labels = document.querySelectorAll('label, th, td, dt, span');
-                        for (const label of labels) {{
-                            const text = label.textContent.toLowerCase();
-                            if (text.includes('номер') && (text.includes('заключения') || text.includes('экспертизы'))) {{
-                                let input = label.nextElementSibling?.querySelector('input');
-                                if (!input) input = label.parentElement?.querySelector('input');
-                                if (!input) input = label.querySelector('input');
-
-                                if (input && input.tagName === 'INPUT') {{
-                                    input.value = String(year);
-                                    input.dispatchEvent(new Event('input', {{bubbles: true}}));
-                                    input.dispatchEvent(new Event('change', {{bubbles: true}}));
-                                    break;
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-            """, year)
-        except Exception as e:
-            logger.warning(f"Error setting expertise year: {e}")
-
-    async def _submit_search_form(self, page) -> None:
-        """
-        Отправить форму поиска (кликнуть кнопку или нажать Enter).
-        """
-        logger.debug("Submitting search form")
-
-        try:
-            # Попробовать несколько вариантов кнопки поиска
-            selectors = [
-                "button[type='submit']",
-                ".search-button",
-                "button.btn-primary",
-                "button[name='search']",
-                "input[type='submit']",
-                "[data-action='search']",
-                "button:has-text('Поиск')",
-                "button:visible",  # Первая видимая кнопка
-                "form button:last-of-type",  # Последняя кнопка в форме
-                "form button",  # Любая кнопка в форме
-            ]
-
-            logger.debug("Trying button selectors for form submission")
-            for selector in selectors:
-                try:
-                    elements = await page.locator(selector).count()
-                    if elements > 0:
-                        logger.debug(f"Found {elements} element(s) with selector: {selector}")
-                        await page.click(selector, timeout=2000)
-                        logger.debug(f"Successfully clicked: {selector}")
-                        await page.wait_for_timeout(500)
-                        return
-                except Exception:
-                    logger.debug(f"Selector {selector} failed, trying next")
+                if option_count == 0:
+                    logger.warning(f"  Option not found: {value}")
                     continue
 
-            # Попробовать найти форму и отправить через JavaScript
-            logger.debug("Trying JavaScript form submission")
-            try:
-                await page.evaluate("""
-                    () => {
-                        const form = document.querySelector('form');
-                        if (form) {
-                            form.submit();
-                        }
-                    }
-                """)
-                await page.wait_for_timeout(500)
-                return
-            except Exception as e:
-                logger.debug(f"JavaScript form submission failed: {e}")
+                # Если найдено несколько — выбрать точное совпадение
+                clicked = False
+                for idx in range(option_count):
+                    opt = option.nth(idx)
+                    text = (await opt.text_content()).strip()
+                    if text == value:
+                        await opt.click()
+                        clicked = True
+                        logger.debug(f"  Selected option (exact): {value}")
+                        break
 
-            # Fallback: нажать Enter (может быть что форма в фокусе)
-            logger.debug("Using Enter key fallback")
-            await page.keyboard.press("Enter")
-            await page.wait_for_timeout(500)
+                # Fallback: кликнуть первый частичный вариант
+                if not clicked:
+                    await option.first.click()
+                    first_text = (await option.first.text_content()).strip()
+                    logger.debug(f"  Selected option (partial): {first_text}")
+
+                await page.wait_for_timeout(300)
+
+            # Закрыть дропдаун
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(300)
 
         except Exception as e:
-            logger.warning(f"Error submitting search form: {e}")
+            logger.warning(f"Error setting filter #{select_id}: {e}")
+
+    async def _submit_search_form(self, page) -> None:
+        """Отправить форму поиска — кликнуть кнопку #search-button-id"""
+        logger.debug("Submitting search form via #search-button-id")
+
+        try:
+            await page.click('#search-button-id', timeout=5000)
+            logger.debug("Successfully clicked #search-button-id")
+            await page.wait_for_timeout(2000)
+        except Exception as e:
+            logger.warning(f"Error clicking #search-button-id: {e}, trying fallback")
+            try:
+                await page.keyboard.press("Enter")
+                await page.wait_for_timeout(2000)
+            except Exception as e2:
+                logger.warning(f"Fallback Enter also failed: {e2}")
 
     def _map_labels_to_fields(self, raw_pairs: dict) -> dict:
         """Сопоставить извлечённые пары лейбл-значение с полями проекта"""
@@ -770,7 +665,7 @@ class ProjectsService:
             "teps": teps if teps else None,
         }
 
-    async def _parse_cards_from_search_page(self, page) -> List[Project]:
+    async def _parse_cards_from_search_page(self, page, max_cards: int = 0) -> List[Project]:
         """
         Парсить карточки из результатов поиска на странице.
 
@@ -786,6 +681,27 @@ class ProjectsService:
             # Дождаться появления карточек (таймаут 30 сек)
             await page.wait_for_selector('div.uk-card.uk-card-small', timeout=30000)
 
+            # Загрузить карточки кликая "показать ещё"
+            # При max_cards > 0 пропускаем пагинацию — хватит первой страницы
+            load_more_clicks = 0
+            if max_cards == 0:
+                while True:
+                    show_more = page.locator('button#button-show-more')
+                    if await show_more.count() == 0:
+                        break
+                    more_attr = await show_more.get_attribute('more')
+                    if more_attr != 'true':
+                        break
+                    await show_more.click()
+                    load_more_clicks += 1
+                    logger.debug(f"Clicked 'показать ещё' (#{load_more_clicks}), loading more cards...")
+                    await page.wait_for_timeout(1500)
+            else:
+                logger.debug(f"Skipping pagination (max_cards={max_cards})")
+
+            if load_more_clicks > 0:
+                logger.info(f"Loaded all cards after {load_more_clicks} 'показать ещё' clicks")
+
             # Получить все карточки
             cards = await page.query_selector_all('div.uk-card.uk-card-default.uk-card-small.uk-card-hover')
             logger.info(f"Found {len(cards)} cards on search page")
@@ -794,7 +710,11 @@ class ProjectsService:
                 logger.warning("No cards found on search page")
                 return projects
 
-            for i, card in enumerate(cards):
+            cards_to_process = cards[:max_cards] if max_cards > 0 else cards
+            if max_cards > 0:
+                logger.info(f"Limiting to {max_cards} cards (of {len(cards)} total)")
+
+            for i, card in enumerate(cards_to_process):
                 try:
                     # Извлечь ID из атрибута data-src (формат: /projects/ID/image.jpg)
                     data_src = await card.get_attribute("data-src")
@@ -829,6 +749,13 @@ class ProjectsService:
 
                     # Мэппировать данные
                     mapped_data = self._map_by_ids_result(raw_data)
+
+                    # Логирование структуры найденных полей
+                    found_fields = {k: v for k, v in mapped_data.items() if v and k != "characteristics"}
+                    missing_fields = [k for k, v in mapped_data.items() if not v and k != "characteristics"]
+                    logger.debug(f"  Карточка {i + 1}: найдено полей={len(found_fields)}, пустых={len(missing_fields)}")
+                    if missing_fields:
+                        logger.debug(f"    Пустые поля: {missing_fields}")
 
                     # Использовать ID из sidebar если есть, иначе из data-src
                     final_vitrina_id = mapped_data.get("vitrina_id") or vitrina_id_from_src
@@ -887,6 +814,11 @@ class ProjectsService:
             if raw_data_ids.get("object_name") or raw_data_ids.get("vitrina_id"):
                 # Успешно извлекли данные через новый метод
                 result = self._map_by_ids_result(raw_data_ids)
+                phase1_fields = {k: v for k, v in raw_data_ids.items() if v and k != "characteristics"}
+                characteristics_count = len(result.get("characteristics") or {})
+                logger.debug(f"  fetch_details {project_url}:")
+                logger.debug(f"    Фаза 1 (ID-based): {len(phase1_fields)} полей — {list(phase1_fields.keys())}")
+                logger.debug(f"    Characteristics: {characteristics_count} доп. полей")
                 logger.debug(f"Details (from IDs) for {project_url}: {list(result.keys())}")
                 return result
 
@@ -896,6 +828,7 @@ class ProjectsService:
 
             # DEBUG: показать все найденные лейблы
             all_labels = list(raw_data.get("pairs", {}).keys())
+            pairs_count = len(raw_data.get("pairs", {}))
             logger.debug(f"Raw pairs from {project_url}: {all_labels}")
 
             if not raw_data.get("pairs"):
@@ -911,6 +844,10 @@ class ProjectsService:
                 else:
                     result["characteristics"] = char_section
 
+            characteristics_count = len(result.get("characteristics") or {})
+            logger.debug(f"  fetch_details {project_url}:")
+            logger.debug(f"    Фаза 2 (label-pairs): {pairs_count} пар найдено")
+            logger.debug(f"    Characteristics: {characteristics_count} доп. полей")
             logger.debug(f"Details (from labels) for {project_url}: {list(result.keys())}")
             return result
 
@@ -946,6 +883,9 @@ class ProjectsService:
                     pub_date = datetime.fromisoformat(date_to_check)
                     if pub_date > cutoff_date:
                         filtered.append(project)
+                        logger.debug(f"  ОСТАВЛЕН: {project.vitrina_id} ({date_to_check})")
+                    else:
+                        logger.debug(f"  ОТСЕЯН по дате: {project.vitrina_id} ({date_to_check}) < {last_run_at}")
                 except ValueError:
                     logger.debug(
                         f"Could not parse date: {date_to_check} for project {project.vitrina_id}"

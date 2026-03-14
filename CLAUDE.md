@@ -38,8 +38,17 @@ python -m src.main
 # Run parser immediately (via /run_now Telegram command or programmatically)
 # Parser runs inside the scheduler service
 
+# Run parser STANDALONE (without bot)
+python run_parser_standalone.py
+
+# Run parser standalone with DEBUG logging
+LOG_LEVEL=DEBUG python run_parser_standalone.py
+
 # Debug: visible browser + run on start
 HEADLESS=false RUN_ON_START=true python -m src.main
+
+# Debug: standalone mode with visible browser
+HEADLESS=false python run_parser_standalone.py
 ```
 
 ### Database & Debugging
@@ -204,6 +213,38 @@ print(details)  # Should show expertise_num, developer, characteristics, etc.
 - `vitrina_id` is UNIQUE → INSERT OR IGNORE prevents re-parsing same project
 - Foreign keys enabled (`PRAGMA foreign_keys = ON`)
 - Settings are deserialized on read (JSON arrays → list, strings → int)
+
+### Parser Logging & Observability
+Comprehensive logging added for full pipeline visibility:
+
+**Startup Parameters** (INFO level):
+- Filter counts and values (categories, regions, expertise years)
+- Chat IDs for notifications
+- Last successful run timestamp
+
+**Filtering Funnel** (INFO level):
+- `[1/4] ПОЛУЧЕНО с сайта` — total projects fetched
+- `[2/4] ПОСЛЕ фильтра по дате` — filtered count + dropped count
+- `[3/4] НОВЫХ объектов для обработки` — new projects
+
+**Project Cards** (INFO level):
+- `[ОБЪЕКТ]` section with vitrina_id, name, category, region, developer, expertise, date, URL, TEPs
+- `[4/4] УВЕДОМЛЕНИЕ отправлено` — notification confirmation per chat
+
+**Parsing Details** (DEBUG level):
+- Found/missing fields from sidebar cards
+- Two-phase parsing results (ID-based + label-pairs)
+- Characteristics count
+- Date filter reasons (ОСТАВЛЕН/ОТСЕЯН)
+
+**Run with logging:**
+```bash
+# INFO level (full pipeline overview)
+python run_parser_standalone.py
+
+# DEBUG level (detailed field-by-field analysis)
+LOG_LEVEL=DEBUG python run_parser_standalone.py
+```
 
 ## Pitfalls & Edge Cases
 

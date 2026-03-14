@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -33,6 +32,7 @@ class SchedulerService:
         self.repository = repository
         self.projects_service: Optional[ProjectsService] = None
         self.scheduler: Optional[AsyncIOScheduler] = None
+        self._max_cards: int = 0  # 0 = без ограничения
 
     async def initialize(self) -> None:
         """Инициализировать планировщик"""
@@ -72,7 +72,9 @@ class SchedulerService:
         notified_count = 0
 
         try:
-            logger.info("Starting parser run")
+            logger.info("=" * 60)
+            logger.info("ЗАПУСК ПАРСЕРА")
+            logger.info("=" * 60)
 
             # Получить настройки
             settings = self.repository.get_all_settings()
@@ -80,75 +82,81 @@ class SchedulerService:
             year_from = settings.expertise_year_from
             year_to = settings.expertise_year_to
 
-            logger.info(f"Last run: {last_run_at or 'never'}")
-            logger.info(f"Expertise year filter: {year_from or '—'} - {year_to or '—'}")
-            logger.info(f"Category filter: {settings.filter_categories or 'all'}")
-            logger.info(f"Region filter: {settings.filter_regions or 'all'}")
-
             # Получить чаты для отправки уведомлений
             notification_chats = self.repository.get_notification_chats()
             chat_ids = [chat.chat_id for chat in notification_chats] if notification_chats else None
-            logger.info(f"Notification chats: {len(notification_chats) if notification_chats else 0}")
+
+            # Сводка параметров фильтров
+            logger.info("ПАРАМЕТРЫ ЗАПУСКА ПАРСЕРА:")
+            logger.info(f"  Категории ({len(settings.filter_categories) if settings.filter_categories else 0}): {settings.filter_categories or 'все'}")
+            logger.info(f"  Регионы ({len(settings.filter_regions) if settings.filter_regions else 0}): {settings.filter_regions or 'все'}")
+            logger.info(f"  Год экспертизы: {year_from or '—'} — {year_to or '—'}")
+            logger.info(f"  Последний успешный запуск: {last_run_at or 'первый запуск'}")
+            logger.info(f"  Чаты для уведомлений ({len(chat_ids) if chat_ids else 0}): {chat_ids}")
+            logger.info("=" * 60)
 
             # Убедиться, что авторизованы
             await self.session.ensure_logged_in()
 
-            # Получить список проектов с фильтрами из БД
-            # Год экспертизы теперь фильтруется на стороне сервера при браузерном поиске
+            # Получить список проектов с серверными фильтрами (категория, регион)
             projects = await self.projects_service.fetch_list(
                 categories=settings.filter_categories or None,
                 regions=settings.filter_regions or None,
-                year_from=year_from,
-                year_to=year_to,
+                max_cards=self._max_cards,
             )
-            logger.info(f"Fetched {len(projects)} projects")
+            total_fetched = len(projects)
+            logger.info(f"[1/4] ПОЛУЧЕНО с сайта: {total_fetched} объектов")
+
+            # Клиентская фильтрация по году экспертизы
+            if year_from or year_to:
+                projects_before_year = len(projects)
+                projects = self.projects_service.filter_by_expertise_year(
+                    projects, year_from=year_from, year_to=year_to
+                )
+                dropped_by_year = projects_before_year - len(projects)
+                logger.info(f"  После фильтра по году: {len(projects)} объектов (отсеяно: {dropped_by_year})")
 
             # Фильтр по дате последнего запуска
+            projects_before_date_filter = len(projects)
             projects = await self.projects_service.filter_by_last_run(projects, last_run_at)
-            logger.info(f"After date filter: {len(projects)} projects")
+            dropped_by_date = projects_before_date_filter - len(projects)
+            logger.info(f"[2/4] ПОСЛЕ фильтра по дате: {len(projects)} объектов (отсеяно: {dropped_by_date})")
 
             # Обработать каждый проект
-            for project in projects:
+            logger.info(f"[3/4] НОВЫХ объектов для обработки: {len(projects)}")
+
+            for i, project in enumerate(projects, 1):
                 if self.repository.is_known(project.vitrina_id):
-                    logger.debug(f"Project already known: {project.vitrina_id}")
+                    logger.debug(f"  ПРОПУЩЕН (уже в БД): {project.vitrina_id} — {project.object_name}")
                     continue
 
-                logger.info(f"Processing new project: {project.vitrina_id}")
+                # Данные уже извлечены из sidebar при парсинге карточек
+                # fetch_details() не используется — отдельных страниц карточек нет,
+                # а навигация на /projects/{id} перезаписывает данные пустыми значениями
 
-                # Сохранить teps из sidebar до перезаписи деталями
-                initial_teps = getattr(project, '_teps', None)
-
-                # Получить детали проекта
-                details = None
-                if project.url:
-                    details = await self.projects_service.fetch_details(
-                        project.url
-                    )
-
-                # Применить детали к объекту project перед сохранением
-                if details:
-                    project.expertise_num = details.get("expertise_num") or project.expertise_num
-                    project.object_name = details.get("object_name") or project.object_name
-                    project.expert_org = details.get("expert_org") or project.expert_org
-                    project.developer = details.get("developer") or project.developer
-                    project.tech_customer = details.get("tech_customer") or project.tech_customer
-                    project.region = details.get("region") or project.region
-                    project.category = details.get("category") or project.category
-                    project.characteristics = details.get("characteristics")
-
-                # Если с полной страницы не пришли ТЭП — добавить из sidebar
-                teps = (details.get("teps") if details else None) or initial_teps
+                # Добавить teps из sidebar в characteristics
+                teps = getattr(project, '_teps', None)
                 if teps and isinstance(project.characteristics, dict):
-                    # Слить teps в characteristics для сохранения в БД
                     project.characteristics.update(teps)
                 elif teps and project.characteristics is None:
                     project.characteristics = dict(teps)
+
+                # Логирование карточки проекта
+                logger.info(f"[ОБЪЕКТ] {project.vitrina_id}")
+                logger.info(f"  Название:   {project.object_name or '—'}")
+                logger.info(f"  Категория:  {project.category or '—'}")
+                logger.info(f"  Регион:     {project.region or '—'}")
+                logger.info(f"  Застройщик: {project.developer or '—'}")
+                logger.info(f"  Экспертиза: {project.expertise_num or '—'}")
+                logger.info(f"  Дата:       {project.published_at or project.updated_at or '—'}")
+                logger.info(f"  URL:        {project.url}")
+                logger.info(f"  ТЭП:        {'есть' if teps else 'нет'}")
 
                 # Сохранить в БД (теперь project заполнен)
                 self.repository.save_project(project)
 
                 # Отправить уведомление
-                message = format_project_notification(project, details)
+                message = format_project_notification(project, None)
                 await self.telegram.send_notification(message, chat_ids)
                 notified_count += 1
 
@@ -162,10 +170,19 @@ class SchedulerService:
                 self.repository.mark_notified(project.vitrina_id)
                 new_count += 1
 
+                # Логирование отправки уведомления
+                if chat_ids:
+                    logger.info(f"[4/4] УВЕДОМЛЕНИЕ отправлено: {project.vitrina_id} → чат {chat_ids}")
+                else:
+                    logger.info(f"[4/4] УВЕДОМЛЕНИЕ не отправлено (нет чатов): {project.vitrina_id}")
+
             # Завершить запуск
             self.repository.finish_run(run.id, "success", new_count)
 
-            logger.info(f"Parser run completed: {new_count} new projects, {notified_count} notified")
+            # Финальная сводка
+            logger.info("=" * 60)
+            logger.info(f"ИТОГ: обработано {new_count}/{total_fetched} объектов, отправлено в {len(chat_ids) if chat_ids else 0} чат(ов)")
+            logger.info("=" * 60)
 
         except Exception as e:
             logger.error(f"Parser error: {e}", exc_info=True)
