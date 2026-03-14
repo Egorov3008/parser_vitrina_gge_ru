@@ -685,6 +685,7 @@ class ProjectsService:
             # При max_cards > 0 пропускаем пагинацию — хватит первой страницы
             load_more_clicks = 0
             if max_cards == 0:
+                prev_card_count = 0
                 while True:
                     show_more = page.locator('button#button-show-more')
                     if await show_more.count() == 0:
@@ -694,8 +695,15 @@ class ProjectsService:
                         break
                     await show_more.click()
                     load_more_clicks += 1
-                    logger.debug(f"Clicked 'показать ещё' (#{load_more_clicks}), loading more cards...")
                     await page.wait_for_timeout(1500)
+                    # Проверить что карточек стало больше — иначе прекратить
+                    current_cards = await page.query_selector_all('div.uk-card.uk-card-default.uk-card-small.uk-card-hover')
+                    current_count = len(current_cards)
+                    logger.debug(f"Clicked 'показать ещё' (#{load_more_clicks}), cards: {current_count}")
+                    if current_count <= prev_card_count:
+                        logger.debug(f"No new cards loaded, stopping pagination")
+                        break
+                    prev_card_count = current_count
             else:
                 logger.debug(f"Skipping pagination (max_cards={max_cards})")
 
