@@ -8,8 +8,13 @@ import asyncio
 import signal
 from typing import Optional
 
-from telegram import Update
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
+from aiogram import Bot, Dispatcher, Router, F
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.filters import Command
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
 
 from src.browser.session import SessionManager
 from src.config import get_config
@@ -22,40 +27,18 @@ from src.utils.logger import get_logger, setup_logger
 
 logger = get_logger()
 
-# Глобальная переменная для scheduler
+# Глобальные переменные для scheduler и admin_panel
 scheduler: Optional[SchedulerService] = None
 admin_panel: Optional[AdminPanelService] = None
 
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработка inline кнопок (только топ-уровневые)"""
-    query = update.callback_query
-    data = query.data
+# ============== Команды ==============
 
-    # Обрабатываем только топ-уровневые кнопки
-    if data == "cmd_status":
-        await query.answer()
-        await status_command(update, context)
-    elif data == "cmd_run_now":
-        await query.answer()
-        await run_now_command(update, context)
-    elif data == "cmd_stats":
-        await query.answer()
-        await stats_command(update, context)
-    elif data == "cmd_admin":
-        await query.answer()
-        await admin_command(update, context)
-    elif data == "cmd_help":
-        await query.answer()
-        await help_command(update, context)
-    # Остальные кнопки обработает админ-панель
-
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_command(message: Message) -> None:
     """Команда /start - приветствие"""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-    message = (
+    text = (
         "👋 <b>Добро пожаловать в парсер витрины проектов!</b>\n\n"
         "🔧 <b>Основные команды:</b>\n"
         "/status - статус последнего запуска\n"
@@ -90,19 +73,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_html(message, reply_markup=reply_markup)
+    await message.reply_html(text, reply_markup=reply_markup)
 
 
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def status_command(message: Message) -> None:
     """Команда /status - информация о последнем запуске"""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
     if not scheduler:
         text = "❌ Планировщик не инициализирован"
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text)
-        else:
-            await update.message.reply_text(text)
+        await message.reply_text(text)
         return
 
     run_log = scheduler.repository.get_last_run()
@@ -125,22 +105,16 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     keyboard = [[InlineKeyboardButton("🚀 Запустить сейчас", callback_data="cmd_run_now")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-    else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    await message.reply_html(text, reply_markup=reply_markup)
 
 
-async def run_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def run_now_command(message: Message) -> None:
     """Команда /run_now - запустить парсер немедленно"""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
     if not scheduler:
         text = "❌ Планировщик не инициализирован"
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text)
-        else:
-            await update.message.reply_text(text)
+        await message.reply_text(text)
         return
 
     # Отправляем сообщение о запуске
@@ -148,10 +122,7 @@ async def run_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     keyboard = [[InlineKeyboardButton("📊 Статус", callback_data="cmd_status")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    if update.callback_query:
-        msg = await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-    else:
-        msg = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    msg = await message.reply_html(text, reply_markup=reply_markup)
 
     # Запускаем парсер
     try:
@@ -168,16 +139,13 @@ async def run_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await msg.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def stats_command(message: Message) -> None:
     """Команда /stats - статистика проектов"""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
     if not scheduler:
         text = "❌ Планировщик не инициализирован"
-        if update.callback_query:
-            await update.callback_query.edit_message_text(text)
-        else:
-            await update.message.reply_text(text)
+        await message.reply_text(text)
         return
 
     stats = scheduler.repository.get_stats()
@@ -202,17 +170,14 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-    else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    await message.reply_html(text, reply_markup=reply_markup)
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help_command(message: Message) -> None:
     """Команда /help - справка"""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-    message = (
+    text = (
         "📖 <b>Справка по парсеру витрины проектов</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "🔧 <b>Основные команды:</b>\n"
@@ -259,73 +224,63 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    if update.callback_query:
-        await update.callback_query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML")
-    else:
-        await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML")
+    await message.reply_html(text, reply_markup=reply_markup)
 
 
-async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def admin_command(message: Message, state: FSMContext) -> None:
     """Команда /admin - панель администратора"""
     global admin_panel
     if not admin_panel:
         text = "❌ Админ-панель не инициализирована"
-        if update.callback_query:
-            await update.callback_query.answer(text, show_alert=True)
-        else:
-            await update.message.reply_text(text)
+        await message.reply_text(text)
         return
 
-    user_id = str(update.effective_user.id) if update.effective_user else ""
+    user_id = message.from_user.id
 
     # Проверка прав
-    if not admin_panel._check_admin(update.effective_user.id if update.effective_user else 0):
-        message = (
+    if not admin_panel._check_admin(user_id):
+        user_id_str = str(user_id)
+        text = (
             "❌ <b>Доступ запрещён</b>\n\n"
-            f"Ваш Telegram ID: <code>{user_id}</code>\n\n"
+            f"Ваш Telegram ID: <code>{user_id_str}</code>\n\n"
             "Для доступа к админ-панели:\n"
             "1. Откройте файл .env\n"
             "2. Добавьте ваш ID в ADMIN_ID:\n"
-            f"<code>ADMIN_ID={user_id}</code>\n"
+            f"<code>ADMIN_ID={user_id_str}</code>\n"
             "3. Перезапустите парсер\n\n"
             "Или попросите текущего администратора\n"
             "добавить вас через /add_admin"
         )
-        if update.callback_query:
-            await update.callback_query.answer(message, show_alert=True)
-        else:
-            await update.message.reply_html(message)
+        await message.reply_html(text)
         return
 
-    await admin_panel.show_admin_menu(update, context)
+    await admin_panel.show_admin_menu(message, state)
 
 
-async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def add_admin_command(message: Message) -> None:
     """Команда /add_admin - добавить администратора"""
-    if update.effective_user is None:
+    if message.from_user is None:
         return
 
-    user_id = str(update.effective_user.id)
-    username = update.effective_user.username
+    user_id = str(message.from_user.id)
+    username = message.from_user.username
 
     # Проверка: только админ может добавлять других
     repo = Repository(Database(get_config().db_path))
     if not repo.is_admin(user_id):
-        await update.message.reply_text(
+        await message.reply_html(
             "❌ Только администратор может добавлять других.\n\n"
             f"Ваш ID: <code>{user_id}</code>\n"
-            "Добавьте себя в ADMIN_ID в .env файле.",
-            parse_mode="HTML",
+            "Добавьте себя в ADMIN_ID в .env файле."
         )
         return
 
-    args = context.args
+    args = message.text.split()[1:] if message.text else []
     if not args:
-        await update.message.reply_text(
+        await message.reply_html(
             "Использование: /add_admin <telegram_id> [telegram_id2, ...]\n\n"
             f"Ваш ID: <code>{user_id}</code>\n\n"
-            "Можно добавить несколько ID через запятую.",
-            parse_mode="HTML",
+            "Можно добавить несколько ID через запятую."
         )
         return
 
@@ -339,32 +294,32 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 repo.add_admin(tid)
                 added.append(tid)
 
-    await update.message.reply_text(
+    await message.reply_text(
         f"✅ Добавлены администраторы:\n" + "\n".join(f"• {tid}" for tid in added)
     )
 
 
-async def get_chat_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def get_chat_id_command(message: Message) -> None:
     """Команда /getChatId - получить ID текущего чата"""
-    if update.message is None or update.effective_chat is None:
+    if message.chat is None:
         return
 
-    chat = update.effective_chat
+    chat = message.chat
     chat_id = chat.id
     chat_type = chat.type
 
-    message = (
+    text = (
         f"📱 <b>ID вашего чата:</b>\n\n"
         f"<code>{chat_id}</code>\n\n"
         f"<b>Тип:</b> {chat_type}\n"
     )
 
     if chat.title:
-        message += f"<b>Название:</b> {chat.title}\n"
+        text += f"<b>Название:</b> {chat.title}\n"
     if chat.username:
-        message += f"<b>Username:</b> @{chat.username}\n"
+        text += f"<b>Username:</b> @{chat.username}\n"
 
-    message += (
+    text += (
         "\n<b>Как добавить этот чат в уведомления:</b>\n"
         "1. Откройте админ-панель (/admin)\n"
         "2. Нажмите на 📱 Чаты\n"
@@ -372,7 +327,14 @@ async def get_chat_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         "✅ Чат будет добавлен и будет получать уведомления!"
     )
 
-    await update.message.reply_html(message)
+    await message.reply_html(text)
+
+
+# ============== Callback Handlers ==============
+
+async def handle_top_level_callbacks(message: Message = None, bot: Bot = None, callback_data: str = None) -> None:
+    """Обработка топ-уровневых callback запросов"""
+    pass  # Будет обработано через Router
 
 
 async def initialize_services() -> tuple:
@@ -420,124 +382,147 @@ async def shutdown_services(
     logger.info("All services closed")
 
 
-async def main_with_retry():
-    """Запуск с обработкой flood control"""
-    max_retries = 3
-    retry_delay = 60  # секунд
-
+async def main():
+    """Запуск бота"""
     db = None
     session = None
     telegram = None
     sched = None
-    app = None
+    bot = None
+    dp = None
 
-    for attempt in range(max_retries):
-        try:
-            # Инициализировать сервисы
-            db, repository, session, telegram, sched = await initialize_services()
+    try:
+        # Инициализировать сервисы
+        db, repository, session, telegram, sched = await initialize_services()
 
-            # Обновить глобальные переменные
-            global scheduler, admin_panel
-            scheduler = sched
-            admin_panel = AdminPanelService(repository)
+        # Обновить глобальные переменные
+        global scheduler, admin_panel
+        scheduler = sched
+        admin_panel = AdminPanelService(repository)
 
-            # Создать Telegram приложение
-            app = Application.builder().token(get_config().telegram_bot_token).build()
+        # Создать Bot и Dispatcher
+        config = get_config()
+        bot = Bot(
+            token=config.telegram_bot_token,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
+        dp = Dispatcher(storage=MemoryStorage())
 
-            # Добавить обработчики команд
-            app.add_handler(CommandHandler("start", start_command))
-            app.add_handler(CommandHandler("status", status_command))
-            app.add_handler(CommandHandler("run_now", run_now_command))
-            app.add_handler(CommandHandler("stats", stats_command))
-            app.add_handler(CommandHandler("help", help_command))
-            app.add_handler(CommandHandler("admin", admin_command))
-            app.add_handler(CommandHandler("add_admin", add_admin_command))
-            app.add_handler(CommandHandler("getChatId", get_chat_id_command))
+        # Инъекция зависимостей в workflow_data
+        dp["scheduler"] = scheduler
+        dp["admin_panel"] = admin_panel
+        dp["repo"] = repository
 
-            # Добавить обработчик inline кнопок (только топ-уровневые)
-            app.add_handler(CallbackQueryHandler(handle_callback, pattern=r"^cmd_"))
+        # Главный router для команд и callbacks
+        router = Router()
 
-            # Добавить обработчики админ-панели
-            app.add_handler(admin_panel.get_callback_handler())
-            app.add_handler(admin_panel.get_message_handler())
+        # Регистрация обработчиков команд
+        @router.message(Command("start"))
+        async def cmd_start(msg: Message):
+            await start_command(msg)
 
-            # Запустить планировщик
-            sched.start()
+        @router.message(Command("status"))
+        async def cmd_status(msg: Message):
+            await status_command(msg)
 
-            # Если нужно, запустить парсер сразу
-            config = get_config()
-            if config.run_on_start:
-                logger.info("Running parser on start...")
-                try:
-                    await sched.run_immediately()
-                except Exception as e:
-                    logger.error(f"Error running parser on start: {e}")
+        @router.message(Command("run_now"))
+        async def cmd_run_now(msg: Message):
+            await run_now_command(msg)
 
-            # Запустить бота через updater напрямую
-            logger.info("Starting Telegram bot...")
+        @router.message(Command("stats"))
+        async def cmd_stats(msg: Message):
+            await stats_command(msg)
+
+        @router.message(Command("help"))
+        async def cmd_help(msg: Message):
+            await help_command(msg)
+
+        @router.message(Command("admin"))
+        async def cmd_admin(msg: Message, state: FSMContext):
+            await admin_command(msg, state)
+
+        @router.message(Command("add_admin"))
+        async def cmd_add_admin(msg: Message):
+            await add_admin_command(msg)
+
+        @router.message(Command("getChatId"))
+        async def cmd_get_chat_id(msg: Message):
+            await get_chat_id_command(msg)
+
+        # Callback handlers для топ-уровневых кнопок
+        @router.callback_query(F.data == "cmd_status")
+        async def cb_status(callback: CallbackQuery):
+            await status_command(callback.message)
+            await callback.answer()
+
+        @router.callback_query(F.data == "cmd_run_now")
+        async def cb_run_now(callback: CallbackQuery):
+            await run_now_command(callback.message)
+            await callback.answer()
+
+        @router.callback_query(F.data == "cmd_stats")
+        async def cb_stats(callback: CallbackQuery):
+            await stats_command(callback.message)
+            await callback.answer()
+
+        @router.callback_query(F.data == "cmd_help")
+        async def cb_help(callback: CallbackQuery):
+            await help_command(callback.message)
+            await callback.answer()
+
+        @router.callback_query(F.data == "cmd_admin")
+        async def cb_admin(callback: CallbackQuery, state: FSMContext):
+            await admin_command(callback.message, state)
+            await callback.answer()
+
+        # Добавить routers
+        dp.include_router(router)
+        dp.include_router(admin_panel.router)
+
+        # Запустить планировщик
+        sched.start()
+
+        # Если нужно, запустить парсер сразу
+        config = get_config()
+        if config.run_on_start:
+            logger.info("Running parser on start...")
             try:
-                await app.initialize()
-                logger.info("App initialized")
-                await app.start()
-                logger.info("App started")
-                await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-                logger.info("Polling started")
+                await sched.run_immediately()
             except Exception as e:
-                logger.error(f"Failed to start bot: {e}", exc_info=True)
-                raise
+                logger.error(f"Error running parser on start: {e}")
 
-            # Держать бота запущенным
-            logger.info("Bot is running, waiting for messages...")
-            while True:
-                await asyncio.sleep(1)
-
+        # Запустить бота
+        logger.info("Starting Telegram bot...")
+        try:
+            await dp.start_polling(bot)
         except Exception as e:
-            error_str = str(e)
-            if "Flood control" in error_str:
-                if attempt < max_retries - 1:
-                    logger.warning(
-                        f"Flood control hit. Retrying in {retry_delay}s "
-                        f"(attempt {attempt + 1}/{max_retries})"
-                    )
-                    # Закрыть сервисы перед retry
-                    if app:
-                        try:
-                            await app.stop()
-                            await app.shutdown()
-                        except Exception:
-                            pass
-                    if sched or telegram or session or db:
-                        await shutdown_services(db, session, telegram, sched)
-                    await asyncio.sleep(retry_delay)
-                else:
-                    logger.critical(
-                        f"Flood control exceeded after {max_retries} attempts. "
-                        f"Wait 10 minutes before restarting."
-                    )
-                    raise
-            else:
-                logger.critical(f"Fatal error: {e}", exc_info=True)
-                raise
-        finally:
-            # Закрыть сервисы после каждой попытки
-            if app:
-                try:
-                    await app.stop()
-                    await app.shutdown()
-                except Exception:
-                    pass
-            if sched or telegram or session or db:
-                try:
-                    await shutdown_services(db, session, telegram, sched)
-                except Exception:
-                    pass  # Игнорировать ошибки при shutdown
+            logger.error(f"Failed to start bot: {e}", exc_info=True)
+            raise
+
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.info("Interrupted by user (Ctrl+C)")
+    except Exception as e:
+        logger.critical(f"Fatal error: {e}", exc_info=True)
+        raise
+    finally:
+        # Закрыть все сервисы при выходе
+        if bot:
+            try:
+                await bot.session.close()
+            except Exception:
+                pass
+        if sched and telegram and session and db:
+            try:
+                await shutdown_services(db, session, telegram, sched)
+            except Exception:
+                pass  # Игнорировать ошибки при shutdown
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main_with_retry())
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        asyncio.run(main())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.info("Bot gracefully stopped")
     except Exception as e:
         logger.critical(f"Fatal error: {e}", exc_info=True)
         exit(1)

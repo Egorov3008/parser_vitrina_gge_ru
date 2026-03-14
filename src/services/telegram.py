@@ -1,8 +1,8 @@
 from typing import List, Optional
-from io import BytesIO
 
-from telegram import Bot, BotCommand
-from telegram.constants import ParseMode
+from aiogram import Bot
+from aiogram.types import BotCommand
+from aiogram.enums import ParseMode
 
 from src.config import get_config
 from src.utils.formatters import format_alert, format_stats, format_status, format_summary
@@ -97,12 +97,12 @@ class TelegramService:
     async def setup_commands(self) -> None:
         """Настроить команды бота"""
         commands = [
-            BotCommand("start", "Основное меню"),
-            BotCommand("admin", "Админ-панель"),
-            BotCommand("status", "Последний запуск парсера"),
-            BotCommand("run_now", "Запустить парсер немедленно"),
-            BotCommand("stats", "Статистика проектов"),
-            BotCommand("help", "Справка по командам"),
+            BotCommand(command="start", description="Основное меню"),
+            BotCommand(command="admin", description="Админ-панель"),
+            BotCommand(command="status", description="Последний запуск парсера"),
+            BotCommand(command="run_now", description="Запустить парсер немедленно"),
+            BotCommand(command="stats", description="Статистика проектов"),
+            BotCommand(command="help", description="Справка по командам"),
         ]
 
         try:
@@ -113,17 +113,18 @@ class TelegramService:
 
     async def send_file(self, file_content: str, filename: str, chat_ids: Optional[List[str]] = None, caption: Optional[str] = None) -> None:
         """Отправить файл через Telegram"""
+        from aiogram.types import BufferedInputFile
+
         target_chats = chat_ids if chat_ids else [self.chat_id]
 
         for chat_id in target_chats:
             try:
                 file_bytes = file_content.encode('utf-8')
-                file_obj = BytesIO(file_bytes)
-                file_obj.name = filename
+                input_file = BufferedInputFile(file_bytes, filename=filename)
 
                 await self.bot.send_document(
                     chat_id=chat_id,
-                    document=file_obj,
+                    document=input_file,
                     caption=caption,
                     parse_mode=ParseMode.HTML if caption else None,
                 )

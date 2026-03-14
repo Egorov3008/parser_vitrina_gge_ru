@@ -4,11 +4,12 @@
 
 import json
 from datetime import datetime
-from typing import List, Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
-from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from aiogram import Router, F
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, Message
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import StateFilter
 
 from src.config import get_config
 from src.db.repository import ParserSettings, Repository
@@ -41,6 +42,12 @@ CALLBACK_CATEGORIES_RESET = "cat_reset"
 CALLBACK_REGIONS_RESET = "reg_reset"
 
 ITEMS_PER_PAGE = 5
+
+
+class AdminFSM(StatesGroup):
+    """FSM состояния для админ-панели"""
+    waiting_schedule = State()   # ожидание cron-выражения
+    waiting_chat_id = State()    # ожидание chat ID
 
 
 class AdminPanelService:
@@ -166,6 +173,23 @@ class AdminPanelService:
     def __init__(self, repo: Repository):
         self.repo = repo
         self.config = get_config()
+        self.router = Router()
+        self._register_handlers()
+
+    def _register_handlers(self):
+        """Регистрация обработчиков aiogram"""
+        # Callback handlers
+        self.router.callback_query.register(self.handle_callback)
+
+        # FSM handlers для ввода текста
+        self.router.message.register(
+            self._handle_schedule_text,
+            AdminFSM.waiting_schedule
+        )
+        self.router.message.register(
+            self._handle_chat_id_text,
+            AdminFSM.waiting_chat_id
+        )
 
     def _check_admin(self, user_id: int) -> bool:
         """Проверить права администратора (БД + конфиг)"""
@@ -179,103 +203,97 @@ class AdminPanelService:
         admin_ids = self.config.get_admin_ids()
         return user_id_str in admin_ids
 
-    async def show_admin_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def show_admin_menu(self, message: Message, state: FSMContext):
         """Показать главное меню админ-панели"""
-        user_id = update.effective_user.id
+        # Очищаем состояние при открытии админ-панели
+        if state:
+            await state.clear()
+
+        user_id = message.from_user.id
 
         if not self._check_admin(user_id):
-            if update.callback_query:
-                await update.callback_query.answer("❌ Нет прав доступа", show_alert=True)
-            else:
-                await update.message.reply_text(
-                    "❌ У вас нет прав администратора.\n\n"
-                    "Обратитесь к текущему администратору для добавления."
-                )
+            await message.reply_text(
+                "❌ У вас нет прав администратора.\n\n"
+                "Обратитесь к текущему администратору для добавления."
+            )
             return
 
-        if update.callback_query:
-            await self.show_admin_menu_from_query(update.callback_query)
-        else:
-            settings = self.repo.get_all_settings()
-            text, keyboard = self._build_admin_menu_content(settings)
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        settings = self.repo.get_all_settings()
+        text, keyboard = self._build_admin_menu_content(settings)
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def handle_callback(self, callback: CallbackQuery, state: FSMContext):
         """Обработка callback запросов от кнопок"""
-        query = update.callback_query
-        user_id = query.from_user.id
+        user_id = callback.from_user.id
 
         if not self._check_admin(user_id):
-            await query.answer("❌ Нет прав доступа", show_alert=True)
+            await callback.answer("❌ Нет прав доступа", show_alert=True)
             return
 
-        await query.answer()
+        await callback.answer()
 
-        data = query.data
+        data = callback.data
 
         if data == CALLBACK_CATEGORIES:
-            await self._show_categories_menu(query)
+            await self._show_categories_menu(callback)
         elif data == CALLBACK_REGIONS:
-            await self._show_regions_menu(query)
+            await self._show_regions_menu(callback)
         elif data == CALLBACK_EXPERTISE_YEAR:
-            await self._show_expertise_year_menu(query)
+            await self._show_expertise_year_menu(callback)
         elif data == CALLBACK_EXPERTISE_YEAR_FROM:
-            await self._show_year_selector(query, "from")
+            await self._show_year_selector(callback, "from")
         elif data == CALLBACK_EXPERTISE_YEAR_TO:
-            await self._show_year_selector(query, "to")
+            await self._show_year_selector(callback, "to")
         elif data.startswith("expertise_year_set:"):
             parts = data.split(":")
             year_type = parts[1]  # "from" or "to"
             year = int(parts[2])
-            await self._set_expertise_year(query, year_type, year)
+            await self._set_expertise_year(callback, year_type, year)
         elif data == "expertise_year_reset":
-            await self._reset_expertise_year(query)
+            await self._reset_expertise_year(callback)
         elif data == CALLBACK_SCHEDULE:
-            await self._show_schedule_menu(query, context)
+            await self._show_schedule_menu(callback, state)
         elif data == CALLBACK_ADMINS:
-            await self._show_admins_menu(query)
+            await self._show_admins_menu(callback)
         elif data.startswith(f"{CALLBACK_ADD_ADMIN}:"):
-            await self._add_admin(query, data.split(":")[1])
+            await self._add_admin(callback, data.split(":")[1])
         elif data.startswith(f"{CALLBACK_REMOVE_ADMIN}:"):
-            await self._remove_admin(query, data.split(":")[1])
+            await self._remove_admin(callback, data.split(":")[1])
         elif data == CALLBACK_NOTIFICATION_CHATS:
-            await self._show_chats_menu(query, context)
+            await self._show_chats_menu(callback, state)
         elif data.startswith(f"{CALLBACK_REMOVE_CHAT}:"):
-            await self._remove_chat(query, context, data.split(":")[1])
+            await self._remove_chat(callback, state, data.split(":")[1])
         elif data == CALLBACK_BACK:
-            await self._show_back_menu(query, context)
+            await self._show_back_menu(callback, state)
         elif data == CALLBACK_EXIT:
-            await self._exit_panel(query, context)
+            await self._exit_panel(callback, state)
         elif data == CALLBACK_SAVE:
-            await self._save_settings(query)
+            await self._save_settings(callback)
         elif data.startswith("cat:"):
             cat_index = int(data[4:])
-            await self._handle_category_toggle(query, cat_index)
+            await self._handle_category_toggle(callback, cat_index)
         elif data.startswith("reg:"):
             region_index = int(data[4:])
-            await self._handle_region_toggle(query, region_index)
-        elif data.startswith("days:"):
-            days = int(data[5:])
-            await self._handle_days_back_set(query, days)
+            await self._handle_region_toggle(callback, region_index)
         elif data.startswith("catpage:"):
             page = int(data[8:])
-            await self._show_categories_menu(query, page)
+            await self._show_categories_menu(callback, page)
         elif data.startswith("regpage:"):
             page = int(data[8:])
-            await self._show_regions_menu(query, page)
+            await self._show_regions_menu(callback, page)
         elif data == CALLBACK_CATEGORIES_RESET:
-            await self._reset_categories(query)
+            await self._reset_categories(callback)
         elif data == CALLBACK_REGIONS_RESET:
-            await self._reset_regions(query)
+            await self._reset_regions(callback)
         elif data == CALLBACK_CLEAR_DATA:
-            await self._show_clear_data_confirmation(query)
+            await self._show_clear_data_confirmation(callback)
         elif data == CALLBACK_CLEAR_DATA_CONFIRM:
-            await self._perform_clear_data(query)
+            await self._perform_clear_data(callback)
         elif data == CALLBACK_EXPORT:
-            await self._perform_export(query)
+            await self._perform_export(callback)
 
-    async def _show_categories_menu(self, query, page: int = 0):
+    async def _show_categories_menu(self, callback: CallbackQuery, page: int = 0):
         """Меню выбора категорий с пагинацией"""
         settings = self.repo.get_all_settings()
         selected = set(settings.filter_categories)
@@ -317,9 +335,9 @@ class AdminPanelService:
         keyboard.append([InlineKeyboardButton("✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-    async def _handle_category_toggle(self, query, cat_index: int):
+    async def _handle_category_toggle(self, callback: CallbackQuery, cat_index: int):
         """Переключить категорию по индексу"""
         settings = self.repo.get_all_settings()
 
@@ -336,9 +354,9 @@ class AdminPanelService:
         self.repo.save_settings(settings)
         # Сохраняем текущую страницу
         current_page = cat_index // ITEMS_PER_PAGE
-        await self._show_categories_menu(query, current_page)
+        await self._show_categories_menu(callback, current_page)
 
-    async def _show_regions_menu(self, query, page: int = 0):
+    async def _show_regions_menu(self, callback: CallbackQuery, page: int = 0):
         """Меню выбора регионов с пагинацией"""
         settings = self.repo.get_all_settings()
         selected = set(settings.filter_regions)
@@ -378,9 +396,9 @@ class AdminPanelService:
         keyboard.append([InlineKeyboardButton("✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-    async def _handle_region_toggle(self, query, region_index: int):
+    async def _handle_region_toggle(self, callback: CallbackQuery, region_index: int):
         """Переключить регион по индексу"""
         settings = self.repo.get_all_settings()
 
@@ -397,11 +415,11 @@ class AdminPanelService:
         self.repo.save_settings(settings)
         # Сохраняем текущую страницу
         current_page = region_index // ITEMS_PER_PAGE
-        await self._show_regions_menu(query, current_page)
+        await self._show_regions_menu(callback, current_page)
 
     # ========== Год экспертизы ==========
 
-    async def _show_expertise_year_menu(self, query):
+    async def _show_expertise_year_menu(self, callback: CallbackQuery):
         """Меню выбора года экспертизы"""
         settings = self.repo.get_all_settings()
         year_from = settings.expertise_year_from
@@ -434,9 +452,9 @@ class AdminPanelService:
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-    async def _show_year_selector(self, query, year_type: str):
+    async def _show_year_selector(self, callback: CallbackQuery, year_type: str):
         """Меню выбора конкретного года"""
         label = "от" if year_type == "from" else "до"
         text = f"📅 Выберите год <b>{label}</b>:\n\n"
@@ -457,9 +475,9 @@ class AdminPanelService:
         keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_EXPERTISE_YEAR)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-    async def _set_expertise_year(self, query, year_type: str, year: int):
+    async def _set_expertise_year(self, callback: CallbackQuery, year_type: str, year: int):
         """Установить год экспертизы"""
         settings = self.repo.get_all_settings()
 
@@ -469,15 +487,15 @@ class AdminPanelService:
             settings.expertise_year_to = year
 
         self.repo.save_settings(settings)
-        await self._show_expertise_year_menu(query)
+        await self._show_expertise_year_menu(callback)
 
-    async def _reset_expertise_year(self, query):
+    async def _reset_expertise_year(self, callback: CallbackQuery):
         """Сбросить фильтр по году экспертизы"""
         settings = self.repo.get_all_settings()
         settings.expertise_year_from = None
         settings.expertise_year_to = None
         self.repo.save_settings(settings)
-        await query.edit_message_text(
+        await callback.message.edit_text(
             "✅ Фильтр по году экспертизы сброшен\n\n"
             "Будут показаны все проекты независимо от года.\n\n"
             "Нажмите ◀️ Назад для продолжения.",
@@ -487,23 +505,23 @@ class AdminPanelService:
             parse_mode="HTML",
         )
 
-    async def _reset_categories(self, query):
+    async def _reset_categories(self, callback: CallbackQuery):
         """Сбросить фильтр по категориям"""
         settings = self.repo.get_all_settings()
         settings.filter_categories = []
         self.repo.save_settings(settings)
         # Показываем меню категорий с начальной страницы
-        await self._show_categories_menu(query, 0)
+        await self._show_categories_menu(callback, 0)
 
-    async def _reset_regions(self, query):
+    async def _reset_regions(self, callback: CallbackQuery):
         """Сбросить фильтр по регионам"""
         settings = self.repo.get_all_settings()
         settings.filter_regions = []
         self.repo.save_settings(settings)
         # Показываем меню регионов с начальной страницы
-        await self._show_regions_menu(query, 0)
+        await self._show_regions_menu(callback, 0)
 
-    async def _show_schedule_menu(self, query, context):
+    async def _show_schedule_menu(self, callback: CallbackQuery, state: FSMContext):
         """Меню расписания"""
         settings = self.repo.get_all_settings()
 
@@ -521,10 +539,10 @@ class AdminPanelService:
         keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-        context.user_data["waiting_schedule"] = True
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await state.set_state(AdminFSM.waiting_schedule)
 
-    async def _show_admins_menu(self, query):
+    async def _show_admins_menu(self, callback: CallbackQuery):
         """Меню администраторов"""
         admins = self.repo.get_admins()
 
@@ -555,25 +573,25 @@ class AdminPanelService:
                 )
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-    async def _add_admin(self, query, telegram_id: str):
+    async def _add_admin(self, callback: CallbackQuery, telegram_id: str):
         """Добавить администратора"""
         self.repo.add_admin(telegram_id)
-        await query.answer(f"✅ Администратор {telegram_id} добавлен", show_alert=True)
-        await self._show_admins_menu(query)
+        await callback.answer(f"✅ Администратор {telegram_id} добавлен", show_alert=True)
+        await self._show_admins_menu(callback)
 
-    async def _remove_admin(self, query, telegram_id: str):
+    async def _remove_admin(self, callback: CallbackQuery, telegram_id: str):
         """Удалить администратора"""
-        if telegram_id == str(query.from_user.id):
-            await query.answer("❌ Нельзя удалить себя", show_alert=True)
+        if telegram_id == str(callback.from_user.id):
+            await callback.answer("❌ Нельзя удалить себя", show_alert=True)
             return
 
         self.repo.remove_admin(telegram_id)
-        await query.answer(f"✅ Администратор {telegram_id} удалён", show_alert=True)
-        await self._show_admins_menu(query)
+        await callback.answer(f"✅ Администратор {telegram_id} удалён", show_alert=True)
+        await self._show_admins_menu(callback)
 
-    async def _show_chats_menu(self, query, context):
+    async def _show_chats_menu(self, callback: CallbackQuery, state: FSMContext):
         """Меню управления чатами для отправки уведомлений"""
         chats = self.repo.get_all_notification_chats()
 
@@ -617,38 +635,33 @@ class AdminPanelService:
                 )
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-        context.user_data["waiting_chat_id"] = True
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await state.set_state(AdminFSM.waiting_chat_id)
 
-    async def _remove_chat(self, query, context, chat_id: str):
+    async def _remove_chat(self, callback: CallbackQuery, state: FSMContext, chat_id: str):
         """Удалить чат"""
         self.repo.remove_notification_chat(chat_id)
-        await query.answer(f"✅ Чат {chat_id} удалён", show_alert=True)
-        await self._show_chats_menu(query, context)
+        await callback.answer(f"✅ Чат {chat_id} удалён", show_alert=True)
+        await self._show_chats_menu(callback, state)
 
-    async def _show_back_menu(self, query, context):
+    async def _show_back_menu(self, callback: CallbackQuery, state: FSMContext):
         """Вернуться в главное меню"""
         # Очищаем состояние ожидания
-        if "waiting_schedule" in context.user_data:
-            del context.user_data["waiting_schedule"]
-        if "waiting_chat_id" in context.user_data:
-            del context.user_data["waiting_chat_id"]
+        await state.clear()
+        await self.show_admin_menu_from_query(callback)
 
-        await self.show_admin_menu_from_query(query)
-
-    async def _exit_panel(self, query, context):
+    async def _exit_panel(self, callback: CallbackQuery, state: FSMContext):
         """Выйти из админ-панели (вернуться в главное меню)"""
-        # Очищаем состояние ожидания расписания
-        if "waiting_schedule" in context.user_data:
-            del context.user_data["waiting_schedule"]
+        # Очищаем состояние ожидания
+        await state.clear()
 
         try:
             # Возвращаемся в главное меню
-            await self.show_admin_menu_from_query(query)
-        except BadRequest as e:
+            await self.show_admin_menu_from_query(callback)
+        except Exception as e:
             # Если сообщение не изменилось (уже на главном меню)
             if "Message is not modified" in str(e):
-                await query.answer()
+                await callback.answer()
             else:
                 logger.error(f"Failed to show admin menu: {e}")
                 raise
@@ -692,88 +705,80 @@ class AdminPanelService:
 
         return text, keyboard
 
-    async def show_admin_menu_from_query(self, query):
+    async def show_admin_menu_from_query(self, callback: CallbackQuery):
         """Показать меню админ-панели из callback query"""
         settings = self.repo.get_all_settings()
         text, keyboard = self._build_admin_menu_content(settings)
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-    async def _save_settings(self, query):
+    async def _save_settings(self, callback: CallbackQuery):
         """Сохранить настройки"""
         # Настройки сохраняются автоматически при изменении
-        await query.answer("✅ Настройки сохранены", show_alert=True)
+        await callback.answer("✅ Настройки сохранены", show_alert=True)
 
-    async def handle_schedule_input(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
-        """Обработка ввода расписания"""
-        user_id = update.effective_user.id
+    async def _handle_schedule_text(self, message: Message, state: FSMContext):
+        """Обработка ввода расписания (FSM)"""
+        user_id = message.from_user.id
 
         if not self._check_admin(user_id):
             return
 
-        # Проверяем, ждём ли мы ввод расписания
-        if context.user_data.get("waiting_schedule"):
-            if update.message is None:
-                return
+        new_schedule = message.text.strip()
 
-            new_schedule = update.message.text.strip()
-
-            # Простая валидация cron (5 полей)
-            parts = new_schedule.split()
-            if len(parts) != 5:
-                await update.message.reply_text(
-                    "❌ Неверный формат cron. Должно быть 5 полей.\n"
-                    "Пример: <code>0 6 * * *</code>",
-                    parse_mode="HTML",
-                )
-                return
-
-            settings = self.repo.get_all_settings()
-            settings.cron_schedule = new_schedule
-            self.repo.save_settings(settings)
-
-            del context.user_data["waiting_schedule"]
-
-            await update.message.reply_text(
-                f"✅ Расписание обновлено: <code>{new_schedule}</code>",
+        # Простая валидация cron (5 полей)
+        parts = new_schedule.split()
+        if len(parts) != 5:
+            await message.reply_text(
+                "❌ Неверный формат cron. Должно быть 5 полей.\n"
+                "Пример: <code>0 6 * * *</code>",
                 parse_mode="HTML",
             )
             return
 
-        # Проверяем, ждём ли мы ввод ID чата
-        if context.user_data.get("waiting_chat_id"):
-            if update.message is None:
-                return
+        settings = self.repo.get_all_settings()
+        settings.cron_schedule = new_schedule
+        self.repo.save_settings(settings)
 
-            chat_id_input = update.message.text.strip()
+        await state.clear()
 
-            # Проверяем, что это число (ID чата)
-            try:
-                # ID могут быть отрицательными (группы) или положительными (личные чаты)
-                int(chat_id_input)
-            except ValueError:
-                await update.message.reply_text(
-                    "❌ Неверный ID чата. Должно быть число.\n"
-                    "Пример: <code>123456789</code> или <code>-1001234567890</code>",
-                    parse_mode="HTML",
-                )
-                return
+        await message.reply_text(
+            f"✅ Расписание обновлено: <code>{new_schedule}</code>",
+            parse_mode="HTML",
+        )
 
-            # Добавляем чат
-            self.repo.add_notification_chat(chat_id_input)
+    async def _handle_chat_id_text(self, message: Message, state: FSMContext):
+        """Обработка ввода ID чата (FSM)"""
+        user_id = message.from_user.id
 
-            await update.message.reply_text(
-                f"✅ Чат {chat_id_input} добавлен для отправки уведомлений",
-                parse_mode="HTML",
-            )
-
-            # Очищаем флаг ожидания
-            del context.user_data["waiting_chat_id"]
+        if not self._check_admin(user_id):
             return
 
-    async def _show_clear_data_confirmation(self, query):
+        chat_id_input = message.text.strip()
+
+        # Проверяем, что это число (ID чата)
+        try:
+            # ID могут быть отрицательными (группы) или положительными (личные чаты)
+            int(chat_id_input)
+        except ValueError:
+            await message.reply_text(
+                "❌ Неверный ID чата. Должно быть число.\n"
+                "Пример: <code>123456789</code> или <code>-1001234567890</code>",
+                parse_mode="HTML",
+            )
+            return
+
+        # Добавляем чат
+        self.repo.add_notification_chat(chat_id_input)
+
+        await state.clear()
+
+        await message.reply_text(
+            f"✅ Чат {chat_id_input} добавлен для отправки уведомлений",
+            parse_mode="HTML",
+        )
+
+    async def _show_clear_data_confirmation(self, callback: CallbackQuery):
         """Показать подтверждение очистки данных"""
         stats = self.repo.get_stats()
 
@@ -794,9 +799,9 @@ class AdminPanelService:
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-    async def _perform_clear_data(self, query):
+    async def _perform_clear_data(self, callback: CallbackQuery):
         """Выполнить очистку данных"""
         try:
             result = self.repo.clear_all_data()
@@ -811,12 +816,12 @@ class AdminPanelService:
             keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data=CALLBACK_BACK)]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-            logger.info(f"Data cleared by admin {query.from_user.id}: {result['projects_deleted']} projects, {result['logs_deleted']} logs")
+            await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+            logger.info(f"Data cleared by admin {callback.from_user.id}: {result['projects_deleted']} projects, {result['logs_deleted']} logs")
 
         except Exception as e:
             logger.error(f"Error clearing data: {e}")
-            await query.answer(f"❌ Ошибка при очистке: {str(e)}", show_alert=True)
+            await callback.answer(f"❌ Ошибка при очистке: {str(e)}", show_alert=True)
 
     def _format_projects_to_txt(self, projects: list) -> str:
         """Форматировать проекты в текст для экспорта"""
@@ -873,7 +878,7 @@ class AdminPanelService:
 
         return "\n".join(lines)
 
-    async def _perform_export(self, query):
+    async def _perform_export(self, callback: CallbackQuery):
         """Выполнить экспорт данных в .txt файл"""
         try:
             from src.services.telegram import TelegramService
@@ -882,7 +887,7 @@ class AdminPanelService:
             projects = self.repo.get_all_projects()
 
             if not projects:
-                await query.answer("❌ Нет данных для экспорта", show_alert=True)
+                await callback.answer("❌ Нет данных для экспорта", show_alert=True)
                 return
 
             # Форматировать в текст
@@ -895,21 +900,14 @@ class AdminPanelService:
             await telegram_service.send_file(
                 file_content=txt_content,
                 filename=f"projects_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                chat_ids=[str(query.from_user.id)],
+                chat_ids=[str(callback.from_user.id)],
                 caption=caption,
             )
 
-            await query.answer("✅ Файл отправлен!", show_alert=False)
-            logger.info(f"Data exported by admin {query.from_user.id}: {len(projects)} projects")
+            await callback.answer("✅ Файл отправлен!", show_alert=False)
+            logger.info(f"Data exported by admin {callback.from_user.id}: {len(projects)} projects")
 
         except Exception as e:
             logger.error(f"Error exporting data: {e}")
-            await query.answer(f"❌ Ошибка при экспорте: {str(e)[:100]}", show_alert=True)
+            await callback.answer(f"❌ Ошибка при экспорте: {str(e)[:100]}", show_alert=True)
 
-    def get_callback_handler(self):
-        """Получить обработчик callback запросов"""
-        return CallbackQueryHandler(self.handle_callback)
-
-    def get_message_handler(self):
-        """Получить обработчик текстовых сообщений для расписания"""
-        return MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_schedule_input)
