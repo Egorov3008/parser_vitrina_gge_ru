@@ -37,6 +37,8 @@ CALLBACK_REMOVE_CHAT = "admin_remove_chat"
 CALLBACK_CLEAR_DATA = "admin_clear_data"
 CALLBACK_CLEAR_DATA_CONFIRM = "admin_clear_data_confirm"
 CALLBACK_EXPORT = "admin_export"
+CALLBACK_CATEGORIES_RESET = "cat_reset"
+CALLBACK_REGIONS_RESET = "reg_reset"
 
 ITEMS_PER_PAGE = 5
 
@@ -262,6 +264,10 @@ class AdminPanelService:
         elif data.startswith("regpage:"):
             page = int(data[8:])
             await self._show_regions_menu(query, page)
+        elif data == CALLBACK_CATEGORIES_RESET:
+            await self._reset_categories(query)
+        elif data == CALLBACK_REGIONS_RESET:
+            await self._reset_regions(query)
         elif data == CALLBACK_CLEAR_DATA:
             await self._show_clear_data_confirmation(query)
         elif data == CALLBACK_CLEAR_DATA_CONFIRM:
@@ -307,6 +313,7 @@ class AdminPanelService:
         if nav_row:
             keyboard.append(nav_row)
 
+        keyboard.append([InlineKeyboardButton("🔄 Сбросить категории", callback_data=CALLBACK_CATEGORIES_RESET)])
         keyboard.append([InlineKeyboardButton("✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -367,6 +374,7 @@ class AdminPanelService:
         if nav_row:
             keyboard.append(nav_row)
 
+        keyboard.append([InlineKeyboardButton("🔄 Сбросить регионы", callback_data=CALLBACK_REGIONS_RESET)])
         keyboard.append([InlineKeyboardButton("✅ Готово", callback_data=CALLBACK_BACK)])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -478,6 +486,22 @@ class AdminPanelService:
             ),
             parse_mode="HTML",
         )
+
+    async def _reset_categories(self, query):
+        """Сбросить фильтр по категориям"""
+        settings = self.repo.get_all_settings()
+        settings.filter_categories = []
+        self.repo.save_settings(settings)
+        # Показываем меню категорий с начальной страницы
+        await self._show_categories_menu(query, 0)
+
+    async def _reset_regions(self, query):
+        """Сбросить фильтр по регионам"""
+        settings = self.repo.get_all_settings()
+        settings.filter_regions = []
+        self.repo.save_settings(settings)
+        # Показываем меню регионов с начальной страницы
+        await self._show_regions_menu(query, 0)
 
     async def _show_schedule_menu(self, query, context):
         """Меню расписания"""
