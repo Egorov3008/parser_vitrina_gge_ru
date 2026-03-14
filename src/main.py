@@ -38,6 +38,9 @@ async def start_command(message: Message) -> None:
     """Команда /start - приветствие"""
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} executed /start command")
+
     text = (
         "👋 <b>Добро пожаловать в парсер витрины проектов!</b>\n\n"
         "🔧 <b>Основные команды:</b>\n"
@@ -81,6 +84,9 @@ async def status_command(message: Message) -> None:
     """Команда /status - информация о последнем запуске"""
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} executed /status command")
+
     if not scheduler:
         text = "❌ Планировщик не инициализирован"
         await message.reply_text(text)
@@ -113,6 +119,9 @@ async def run_now_command(message: Message) -> None:
     """Команда /run_now - запустить парсер немедленно"""
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} executed /run_now command")
+
     if not scheduler:
         text = "❌ Планировщик не инициализирован"
         await message.reply_text(text)
@@ -143,6 +152,9 @@ async def run_now_command(message: Message) -> None:
 async def stats_command(message: Message) -> None:
     """Команда /stats - статистика проектов"""
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} executed /stats command")
 
     if not scheduler:
         text = "❌ Планировщик не инициализирован"
@@ -177,6 +189,9 @@ async def stats_command(message: Message) -> None:
 async def help_command(message: Message) -> None:
     """Команда /help - справка"""
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} executed /help command")
 
     text = (
         "📖 <b>Справка по парсеру витрины проектов</b>\n\n"
@@ -237,9 +252,11 @@ async def admin_command(message: Message, state: FSMContext) -> None:
         return
 
     user_id = message.from_user.id
+    logger.info(f"User {user_id} executed /admin command")
 
     # Проверка прав
     if not admin_panel._check_admin(user_id):
+        logger.warning(f"User {user_id} denied access to admin panel (not in admin list)")
         user_id_str = str(user_id)
         text = (
             "❌ <b>Доступ запрещён</b>\n\n"
@@ -265,10 +282,12 @@ async def add_admin_command(message: Message) -> None:
 
     user_id = str(message.from_user.id)
     username = message.from_user.username
+    logger.info(f"User {user_id} executed /add_admin command")
 
     # Проверка: только админ может добавлять других
     repo = Repository(Database(get_config().db_path))
     if not repo.is_admin(user_id):
+        logger.warning(f"User {user_id} denied access to /add_admin (not admin)")
         await message.answer(
             "❌ Только администратор может добавлять других.\n\n"
             f"Ваш ID: <code>{user_id}</code>\n"
@@ -296,6 +315,7 @@ async def add_admin_command(message: Message) -> None:
             if tid:
                 repo.add_admin(tid)
                 added.append(tid)
+                logger.info(f"Admin {user_id} added new admin: {tid}")
 
     await message.reply_text(
         f"✅ Добавлены администраторы:\n" + "\n".join(f"• {tid}" for tid in added)
@@ -306,6 +326,9 @@ async def get_chat_id_command(message: Message) -> None:
     """Команда /getChatId - получить ID текущего чата"""
     if message.chat is None:
         return
+
+    user_id = message.from_user.id if message.from_user else "unknown"
+    logger.info(f"User {user_id} executed /getChatId command")
 
     chat = message.chat
     chat_id = chat.id
@@ -455,26 +478,36 @@ async def main():
         # Callback handlers для топ-уровневых кнопок
         @router.callback_query(F.data == "cmd_status")
         async def cb_status(callback: CallbackQuery):
+            user_id = callback.from_user.id
+            logger.info(f"User {user_id} clicked cmd_status button")
             await status_command(callback.message)
             await callback.answer()
 
         @router.callback_query(F.data == "cmd_run_now")
         async def cb_run_now(callback: CallbackQuery):
+            user_id = callback.from_user.id
+            logger.info(f"User {user_id} clicked cmd_run_now button")
             await run_now_command(callback.message)
             await callback.answer()
 
         @router.callback_query(F.data == "cmd_stats")
         async def cb_stats(callback: CallbackQuery):
+            user_id = callback.from_user.id
+            logger.info(f"User {user_id} clicked cmd_stats button")
             await stats_command(callback.message)
             await callback.answer()
 
         @router.callback_query(F.data == "cmd_help")
         async def cb_help(callback: CallbackQuery):
+            user_id = callback.from_user.id
+            logger.info(f"User {user_id} clicked cmd_help button")
             await help_command(callback.message)
             await callback.answer()
 
         @router.callback_query(F.data == "cmd_admin")
         async def cb_admin(callback: CallbackQuery, state: FSMContext):
+            user_id = callback.from_user.id
+            logger.info(f"User {user_id} clicked cmd_admin button")
             await admin_command(callback.message, state)
             await callback.answer()
 

@@ -230,12 +230,14 @@ class AdminPanelService:
         user_id = callback.from_user.id
 
         if not self._check_admin(user_id):
+            logger.warning(f"User {user_id} denied access to admin panel callback")
             await callback.answer("❌ Нет прав доступа", show_alert=True)
             return
 
         await callback.answer()
 
         data = callback.data
+        logger.info(f"User {user_id} admin callback: {data}")
 
         if data == CALLBACK_CATEGORIES:
             await self._show_categories_menu(callback)
@@ -722,8 +724,10 @@ class AdminPanelService:
     async def _handle_schedule_text(self, message: Message, state: FSMContext):
         """Обработка ввода расписания (FSM)"""
         user_id = message.from_user.id
+        logger.info(f"User {user_id} entered schedule text in FSM")
 
         if not self._check_admin(user_id):
+            logger.warning(f"User {user_id} tried to set schedule without admin rights")
             return
 
         new_schedule = message.text.strip()
@@ -752,8 +756,10 @@ class AdminPanelService:
     async def _handle_chat_id_text(self, message: Message, state: FSMContext):
         """Обработка ввода ID чата (FSM)"""
         user_id = message.from_user.id
+        logger.info(f"User {user_id} entered chat ID text in FSM")
 
         if not self._check_admin(user_id):
+            logger.warning(f"User {user_id} tried to add chat ID without admin rights")
             return
 
         chat_id_input = message.text.strip()
