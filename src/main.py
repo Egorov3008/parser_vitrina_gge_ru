@@ -508,7 +508,27 @@ async def main():
         async def cb_admin(callback: CallbackQuery, state: FSMContext):
             user_id = callback.from_user.id
             logger.info(f"User {user_id} clicked cmd_admin button")
-            await admin_command(callback.message, state)
+
+            # Check admin rights
+            if not admin_panel._check_admin(user_id):
+                logger.warning(f"User {user_id} denied access to admin panel (not in admin list)")
+                user_id_str = str(user_id)
+                text = (
+                    "❌ <b>Доступ запрещён</b>\n\n"
+                    f"Ваш Telegram ID: <code>{user_id_str}</code>\n\n"
+                    "Для доступа к админ-панели:\n"
+                    "1. Откройте файл .env\n"
+                    "2. Добавьте ваш ID в ADMIN_ID:\n"
+                    f"<code>ADMIN_ID={user_id_str}</code>\n"
+                    "3. Перезапустите парсер\n\n"
+                    "Или попросите текущего администратора\n"
+                    "добавить вас через /add_admin"
+                )
+                await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
+            else:
+                # Show admin panel menu
+                await admin_panel.show_admin_menu(callback.message, state)
+
             await callback.answer()
 
         # Добавить routers
