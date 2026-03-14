@@ -748,9 +748,13 @@ class AdminPanelService:
 
         await state.clear()
 
+        keyboard = [[InlineKeyboardButton(text="◀️ Назад в админ-панель", callback_data=CALLBACK_BACK)]]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+
         await message.answer(
             f"✅ Расписание обновлено: <code>{new_schedule}</code>",
             parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
         )
 
     async def _handle_chat_id_text(self, message: Message, state: FSMContext):
@@ -781,9 +785,13 @@ class AdminPanelService:
 
         await state.clear()
 
+        keyboard = [[InlineKeyboardButton(text="◀️ Назад в админ-панель", callback_data=CALLBACK_BACK)]]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+
         await message.answer(
             f"✅ Чат {chat_id_input} добавлен для отправки уведомлений",
             parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
         )
 
     async def _show_clear_data_confirmation(self, callback: CallbackQuery):
