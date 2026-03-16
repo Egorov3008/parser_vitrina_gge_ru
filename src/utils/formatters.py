@@ -1,11 +1,11 @@
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from src.db.repository import Project
 
 
-def format_project_notification(project: Project, details: Optional[Dict] = None) -> str:
-    """Форматировать уведомление о новом проекте в HTML для Telegram (только 5 основных полей)"""
+def format_project_notification(project: Project, egrz_results: Optional[List[Dict]] = None) -> str:
+    """Форматировать уведомление о новом проекте в HTML для Telegram"""
 
     html = "🏗️ <b>Новый проект</b>\n\n"
 
@@ -23,6 +23,24 @@ def format_project_notification(project: Project, details: Optional[Dict] = None
 
     if project.tech_customer:
         html += f"🔧 <b>Технический заказчик:</b> {escape_html(project.tech_customer)}\n"
+
+    # Данные ЕГРЗ
+    if egrz_results:
+        first = egrz_results[0]
+        egrz_fields = [
+            ("Результат экспертизы", "Результат"),
+            ("Вид экспертизы", "Вид экспертизы"),
+            ("Адрес объекта", "Адрес"),
+            ("Проектировщик", "Проектировщик"),
+        ]
+        egrz_lines = []
+        for api_key, label in egrz_fields:
+            val = first.get(api_key)
+            if val:
+                egrz_lines.append(f"  {label}: {escape_html(str(val))}")
+        if egrz_lines:
+            html += f"\n📊 <b>Данные ЕГРЗ:</b>\n"
+            html += "\n".join(egrz_lines) + "\n"
 
     # Ссылка на проект
     if project.url:
@@ -170,6 +188,49 @@ def format_teps_file(project: Project, teps: Dict) -> str:
     # Добавить все ТЭП пары
     for key, value in teps.items():
         lines.append(f"{key}: {value}")
+
+    return "\n".join(lines)
+
+
+def format_egrz_file(project: Project, egrz_results: List[Dict]) -> str:
+    """Форматировать данные ЕГРЗ в текстовый файл."""
+    lines = []
+
+    # Заголовок
+    if project.expertise_num:
+        lines.append(f"Номер экспертизы: {project.expertise_num}")
+    if project.object_name:
+        lines.append(f"Наименование объекта: {project.object_name}")
+    if project.url:
+        lines.append(f"Ссылка: {project.url}")
+
+    for idx, item in enumerate(egrz_results):
+        lines.append("")
+        if len(egrz_results) > 1:
+            lines.append(f"=== Заключение {idx + 1} ===")
+        else:
+            lines.append("Данные ЕГРЗ:")
+        lines.append("-" * 50)
+
+        for key, value in item.items():
+            if key == "ТЭП" and isinstance(value, list):
+                lines.append(f"\n{key}:")
+                for tep in value:
+                    if isinstance(tep, dict):
+                        name = tep.get("Name") or tep.get("TprName", "")
+                        val = tep.get("Value") or tep.get("TprValue", "")
+                        unit = tep.get("Unit") or tep.get("TprUnit", "")
+                        if name:
+                            line = f"  {name}"
+                            if val:
+                                line += f": {val}"
+                            if unit:
+                                line += f" {unit}"
+                            lines.append(line)
+                    else:
+                        lines.append(f"  {tep}")
+            else:
+                lines.append(f"{key}: {value}")
 
     return "\n".join(lines)
 

@@ -235,24 +235,38 @@ class ProjectsService:
         categories: Optional[List[str]] = None,
         regions: Optional[List[str]] = None,
         max_cards: int = 0,
+        expertise_years: Optional[List[int]] = None,
     ) -> List[Project]:
         """
-        Получить список проектов с применением серверных фильтров (категория, регион).
+        Получить список проектов с применением серверных фильтров (категория, регион, год экспертизы).
 
-        Фильтрация по году экспертизы выполняется клиентски через filter_by_expertise_year().
+        Когда expertise_years указан, API пропускается (не поддерживает этот фильтр)
+        и используется браузерный поиск с полем #filter-conclusion-text-id.
+
+        Фильтры categories/regions передаются явно из scheduler (берутся из БД).
         """
-        effective_categories = categories if categories is not None else self.config.filter_categories
-        effective_regions = regions if regions is not None else self.config.filter_regions
+        effective_categories = categories if categories is not None else []
+        effective_regions = regions if regions is not None else []
+
+        # Если указаны годы экспертизы — сразу идём в браузерный поиск (API не поддерживает этот фильтр)
+        if expertise_years:
+            logger.info(f"Using browser search (expertise_years={expertise_years}), categories={effective_categories}, regions={effective_regions}")
+            return await self._fetch_via_browser_search(
+                effective_categories, effective_regions, limit=limit, max_cards=max_cards,
+                expertise_years=expertise_years,
+            )
 
         try:
             # Попробовать получить через API
             token = await self.session.get_api_token()
             if token:
+                logger.info(f"Using API with token, categories={effective_categories}, regions={effective_regions}")
                 return await self._fetch_via_api(token, limit, effective_categories, effective_regions)
         except Exception as e:
             logger.warning(f"API fetch failed: {e}, falling back to browser search")
 
         # Fallback на браузерный поиск
+        logger.info(f"Using browser search, categories={effective_categories}, regions={effective_regions}")
         return await self._fetch_via_browser_search(
             effective_categories, effective_regions, limit=limit, max_cards=max_cards
         )
@@ -263,7 +277,7 @@ class ProjectsService:
         regions: Optional[List[str]] = None,
     ) -> List[Project]:
         """Получить проекты через API"""
-        logger.info("Fetching projects via API")
+        logger.info(f"Fetching projects via API: categories={categories}, regions={regions}")
 
         params = {
             "limit": limit,
@@ -275,6 +289,8 @@ class ProjectsService:
             params["categories"] = ",".join(categories)
         if regions:
             params["regions"] = ",".join(regions)
+
+        logger.info(f"API request params: {params}")
 
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -423,6 +439,7 @@ class ProjectsService:
         regions: Optional[List[str]],
         limit: int = 100,
         max_cards: int = 0,
+        expertise_years: Optional[List[int]] = None,
     ) -> List[Project]:
         """
         Получить проекты через браузерный поиск с парсингом карточек.
@@ -431,11 +448,58 @@ class ProjectsService:
         Каждую карточку кликают, открывается sidebar с деталями (#object-* элементы),
         извлекаются данные и sidebar закрывается.
         """
-        logger.info(f"Fetching projects via browser search (categories={categories}, regions={regions})")
+        logger.info(f"Fetching projects via browser search (categories={categories}, regions={regions}, expertise_years={expertise_years})")
 
         await self.session.ensure_logged_in()
         page = self.session.page
 
+        # Если указаны годы экспертизы — итерируем по каждому году отдельно
+        if expertise_years:
+            all_projects = []
+            seen_ids = set()
+            for year in expertise_years:
+                logger.info(f"Fetching projects for expertise year {year}")
+                try:
+                    year_projects = await self._fetch_browser_search_single(
+                        page, categories, regions, max_cards=max_cards,
+                        expertise_year=str(year),
+                    )
+                    # Дедупликация по vitrina_id
+                    for p in year_projects:
+                        if p.vitrina_id not in seen_ids:
+                            seen_ids.add(p.vitrina_id)
+                            all_projects.append(p)
+                    logger.info(f"Year {year}: {len(year_projects)} cards, {len(all_projects)} unique total")
+                except Exception as e:
+                    logger.error(f"Error fetching year {year}: {e}")
+                    continue
+            logger.info(f"Fetched {len(all_projects)} unique projects via browser search (years: {expertise_years})")
+            return all_projects
+
+        # Без фильтра по году — обычный одиночный запрос
+        try:
+            projects = await self._fetch_browser_search_single(
+                page, categories, regions, max_cards=max_cards,
+            )
+            logger.info(f"Fetched {len(projects)} projects via browser search")
+            return projects
+        except Exception as e:
+            logger.error(f"Browser search error: {e}")
+            return []
+
+    async def _fetch_browser_search_single(
+        self,
+        page,
+        categories: Optional[List[str]],
+        regions: Optional[List[str]],
+        max_cards: int = 0,
+        expertise_year: Optional[str] = None,
+    ) -> List[Project]:
+        """
+        Выполнить один поиск в браузере (с опциональным фильтром по году экспертизы).
+
+        Навигирует на /projects/, устанавливает фильтры, отправляет форму и парсит карточки.
+        """
         try:
             # Перейти на страницу поиска
             # Сначала убедимся что мы на главной странице (для правильной инициализации сессии)
@@ -449,7 +513,9 @@ class ProjectsService:
             # Теперь перейти на страницу проектов
             try:
                 logger.debug(f"Navigating to {self.config.vitrina_url}/projects/")
-                await page.goto(f"{self.config.vitrina_url}/projects/", wait_until="domcontentloaded", timeout=30000)
+                # Переходим на чистую страницу проектов без фильтров
+                await page.goto(f"{self.config.vitrina_url}/projects/", wait_until="networkidle", timeout=30000)
+                await page.wait_for_timeout(2000)
                 logger.debug(f"Navigation complete, current URL: {page.url}")
             except Exception as e:
                 logger.warning(f"Projects page navigation: {e}")
@@ -469,6 +535,10 @@ class ProjectsService:
             if "/projects" not in current_url:
                 logger.warning(f"Expected /projects page but got: {current_url}")
 
+            # Сбросить существующие фильтры перед установкой новых
+            logger.debug("Resetting existing filters")
+            await self._reset_filters(page)
+
             # Установить фильтры через ID элементов
             if categories:
                 logger.debug(f"Setting category filter: {categories}")
@@ -477,17 +547,210 @@ class ProjectsService:
                 logger.debug(f"Setting region filter: {regions}")
                 await self._set_filter_by_select_id(page, "filter-region-select-id", regions)
 
-            # Отправить форму
-            await self._submit_search_form(page)
+            # Установить фильтр по году экспертизы (если указан)
+            if expertise_year:
+                await self._set_expertise_year_filter(page, expertise_year)
+
+            # Отправить форму (расширенный поиск если есть год, обычный иначе)
+            if expertise_year:
+                await self._submit_advanced_search_form(page)
+            else:
+                await self._submit_search_form(page)
+
+            # Дождаться обновления URL или появления индикатора загрузки
+            await page.wait_for_timeout(3000)
+            logger.info(f"Current URL after search: {page.url}")
+
+            # Проверить что фильтры применены - посмотреть на selected options
+            cat_selected = await page.evaluate("""
+                () => {
+                    const sel = document.querySelector('#filter-function-select-id');
+                    return sel ? Array.from(sel.selectedOptions).map(o => o.text) : [];
+                }
+            """)
+            reg_selected = await page.evaluate("""
+                () => {
+                    const sel = document.querySelector('#filter-region-select-id');
+                    return sel ? Array.from(sel.selectedOptions).map(o => o.text) : [];
+                }
+            """)
+            logger.info(f"Active filters - Category: {cat_selected}, Region: {reg_selected}" +
+                        (f", Expertise year: {expertise_year}" if expertise_year else ""))
 
             # Парсить карточки из результатов поиска
-            projects = await self._parse_cards_from_search_page(page, max_cards=max_cards)
-            logger.info(f"Fetched {len(projects)} projects via browser search")
+            try:
+                projects = await self._parse_cards_from_search_page(page, max_cards=max_cards)
+            except Exception as e:
+                logger.warning(f"No cards found for search (expertise_year={expertise_year}): {e}")
+                projects = []
             return projects
 
         except Exception as e:
-            logger.error(f"Browser search error: {e}")
+            logger.error(f"Browser search error (expertise_year={expertise_year}): {e}")
             return []
+
+    async def _set_expertise_year_filter(self, page, year_str: str) -> None:
+        """Fill #filter-conclusion-text-id with year value for server-side filtering.
+
+        The input lives inside a UIkit accordion panel that is collapsed by default.
+        We must expand it before filling.
+        """
+        selector = '#filter-conclusion-text-id'
+
+        # Step 1: Expand the advanced-search accordion so the input becomes visible
+        expanded = await self._expand_advanced_search_accordion(page)
+        if not expanded:
+            logger.warning("Could not confirm accordion expanded; will attempt fill anyway")
+
+        # Step 2: Wait for the input to become visible
+        try:
+            await page.wait_for_selector(selector, state='visible', timeout=3000)
+        except Exception:
+            logger.debug(f"wait_for_selector visible timed out for {selector}, proceeding")
+
+        # Step 3: Fill the value
+        try:
+            await page.fill(selector, "")
+            await page.fill(selector, year_str)
+            logger.debug(f"Set expertise conclusion filter to: {year_str}")
+        except Exception as e:
+            logger.warning(f"Could not set expertise year filter: {e}")
+
+    async def _expand_advanced_search_accordion(self, page) -> bool:
+        """Expand the advanced-search UIkit accordion so hidden inputs become visible.
+
+        Tries: UIkit JS API → click accordion title → direct DOM unhide.
+        """
+        # Check if already open
+        already_open = await page.evaluate("""
+            () => {
+                const input = document.querySelector('#filter-conclusion-text-id');
+                if (!input) return false;
+                let el = input;
+                while (el && !el.classList.contains('uk-accordion-content')) {
+                    el = el.parentElement;
+                }
+                if (!el) return false;
+                return !el.hasAttribute('hidden') && el.offsetParent !== null;
+            }
+        """)
+        if already_open:
+            logger.debug("Advanced search accordion already open")
+            return True
+
+        # Strategy 1: UIkit JS API
+        try:
+            toggled = await page.evaluate("""
+                () => {
+                    const input = document.querySelector('#filter-conclusion-text-id');
+                    if (!input) return false;
+                    let panel = input;
+                    while (panel && !panel.classList.contains('uk-accordion-content')) {
+                        panel = panel.parentElement;
+                    }
+                    if (!panel) return false;
+                    const item = panel.parentElement;
+                    if (!item) return false;
+                    let accordionEl = item.parentElement;
+                    while (accordionEl && !accordionEl.hasAttribute('uk-accordion')) {
+                        accordionEl = accordionEl.parentElement;
+                    }
+                    if (!accordionEl || !window.UIkit) return false;
+                    const accordion = UIkit.accordion(accordionEl);
+                    const items = Array.from(accordionEl.children);
+                    const idx = items.indexOf(item);
+                    if (idx >= 0) {
+                        accordion.toggle(idx, true);
+                        return true;
+                    }
+                    return false;
+                }
+            """)
+            if toggled:
+                await page.wait_for_timeout(500)
+                logger.debug("Expanded accordion via UIkit JS API")
+                return True
+        except Exception as e:
+            logger.debug(f"UIkit API accordion toggle failed: {e}")
+
+        # Strategy 2: Click the accordion title via JS
+        try:
+            title_clicked = await page.evaluate("""
+                () => {
+                    const input = document.querySelector('#filter-conclusion-text-id');
+                    if (!input) return false;
+                    let el = input;
+                    while (el && el.tagName !== 'LI') {
+                        el = el.parentElement;
+                    }
+                    if (!el) return false;
+                    const title = el.querySelector('.uk-accordion-title, [uk-accordion-title]');
+                    if (title) { title.click(); return true; }
+                    return false;
+                }
+            """)
+            if title_clicked:
+                await page.wait_for_timeout(500)
+                logger.debug("Expanded accordion via title click (JS)")
+                return True
+        except Exception as e:
+            logger.debug(f"JS title click failed: {e}")
+
+        # Strategy 2b: Playwright click on accordion title by text
+        for text_pattern in ["Расширенный поиск", "Дополнительные параметры", "Расширенный"]:
+            try:
+                title_loc = page.locator(
+                    f'.uk-accordion-title:has-text("{text_pattern}"), '
+                    f'a[uk-accordion-title]:has-text("{text_pattern}")'
+                )
+                if await title_loc.count() > 0:
+                    await title_loc.first.click()
+                    await page.wait_for_timeout(500)
+                    logger.debug(f"Expanded accordion via Playwright click on title: {text_pattern}")
+                    return True
+            except Exception as e:
+                logger.debug(f"Playwright title click ({text_pattern}) failed: {e}")
+
+        # Strategy 3: Direct DOM manipulation — remove 'hidden', add 'uk-open'
+        try:
+            forced = await page.evaluate("""
+                () => {
+                    const input = document.querySelector('#filter-conclusion-text-id');
+                    if (!input) return false;
+                    let panel = input;
+                    while (panel && !panel.classList.contains('uk-accordion-content')) {
+                        panel = panel.parentElement;
+                    }
+                    if (!panel) return false;
+                    panel.removeAttribute('hidden');
+                    panel.style.display = '';
+                    const item = panel.parentElement;
+                    if (item) item.classList.add('uk-open');
+                    return true;
+                }
+            """)
+            if forced:
+                await page.wait_for_timeout(200)
+                logger.debug("Expanded accordion via direct DOM manipulation (fallback)")
+                return True
+        except Exception as e:
+            logger.debug(f"Direct DOM accordion expansion failed: {e}")
+
+        logger.warning("All accordion expansion strategies failed for advanced search")
+        return False
+
+    async def _submit_advanced_search_form(self, page) -> None:
+        """Submit the advanced search form by clicking #set-filter-advanced-button-id."""
+        logger.debug("Submitting advanced search form via #set-filter-advanced-button-id")
+        btn_selector = '#set-filter-advanced-button-id'
+        try:
+            await page.wait_for_selector(btn_selector, state='visible', timeout=3000)
+            await page.click(btn_selector, timeout=5000)
+            logger.debug("Successfully clicked #set-filter-advanced-button-id")
+            await page.wait_for_timeout(2000)
+        except Exception as e:
+            logger.warning(f"Error clicking #set-filter-advanced-button-id: {e}, falling back to regular search")
+            await self._submit_search_form(page)
 
     async def _set_filter_by_select_id(
         self, page, select_id: str, values: List[str]
@@ -580,8 +843,40 @@ class ProjectsService:
             await page.keyboard.press("Escape")
             await page.wait_for_timeout(300)
 
+            # Проверить что фильтр установлен — проверить оригинальный <select>
+            selected_values = await page.evaluate(f"""
+                () => {{
+                    const select = document.querySelector('#{select_id}');
+                    if (!select) return [];
+                    return Array.from(select.selectedOptions).map(opt => opt.value);
+                }}
+            """)
+            logger.debug(f"  Selected values in <select>: {selected_values}")
+
         except Exception as e:
             logger.warning(f"Error setting filter #{select_id}: {e}")
+
+    async def _reset_filters(self, page) -> None:
+        """
+        Сбросить все фильтры на странице проектов.
+
+        Кликает кнопку "Сбросить" если она есть, или перезагружает страницу.
+        """
+        try:
+            # Попробовать найти и кликнуть кнопку "Сбросить" / "Reset"
+            reset_button = page.locator(
+                'button:has-text("Сбросить"), button:has-text("Reset"), '
+                'a:has-text("Сбросить"), .reset-btn, #reset-btn'
+            )
+            if await reset_button.count() > 0:
+                await reset_button.first.click()
+                await page.wait_for_timeout(500)
+                logger.debug("Filters reset via button")
+            else:
+                # Fallback: перезагрузить страницу
+                logger.debug("Reset button not found, reloading page")
+        except Exception as e:
+            logger.debug(f"Could not reset filters: {e}")
 
     async def _submit_search_form(self, page) -> None:
         """Отправить форму поиска — кликнуть кнопку #search-button-id"""
@@ -663,6 +958,7 @@ class ProjectsService:
             "vitrina_id": data.get("vitrina_id"),
             "characteristics": characteristics if characteristics else None,
             "teps": teps if teps else None,
+            "expertise_nums": data.get("expertise_nums", []),
         }
 
     async def _parse_cards_from_search_page(self, page, max_cards: int = 0) -> List[Project]:
@@ -681,29 +977,86 @@ class ProjectsService:
             # Дождаться появления карточек (таймаут 30 сек)
             await page.wait_for_selector('div.uk-card.uk-card-small', timeout=30000)
 
+            # Проверить сколько карточек видно сразу
+            initial_cards = await page.query_selector_all('div.uk-card.uk-card-default.uk-card-small.uk-card-hover')
+            logger.info(f"Initial cards visible: {len(initial_cards)}")
+            
+            # Проверить наличие кнопки "Показать ещё"
+            show_more_button = page.locator('button#button-show-more')
+            show_more_count = await show_more_button.count()
+            logger.info(f"Show more button found: {show_more_count > 0}")
+            if show_more_count > 0:
+                more_attr = await show_more_button.first.get_attribute('more')
+                logger.info(f"Show more button 'more' attribute: {more_attr}")
+                more_text = await show_more_button.first.text_content()
+                logger.info(f"Show more button text: {more_text.strip()}")
+
             # Загрузить карточки кликая "показать ещё"
             # При max_cards > 0 пропускаем пагинацию — хватит первой страницы
             load_more_clicks = 0
             if max_cards == 0:
                 prev_card_count = 0
-                while True:
+                max_attempts = 50  # Максимум 50 попыток загрузки
+                attempt = 0
+                
+                while attempt < max_attempts:
+                    attempt += 1
                     show_more = page.locator('button#button-show-more')
                     if await show_more.count() == 0:
+                        logger.info("Show more button not found, stopping pagination")
                         break
-                    more_attr = await show_more.get_attribute('more')
-                    if more_attr != 'true':
+                    
+                    # Проверить видима ли кнопка
+                    is_visible = await show_more.first.is_visible()
+                    
+                    # Кликать если кнопка видима (независимо от атрибута more)
+                    more_text = await show_more.first.text_content()
+                    
+                    if 'показать ещё' not in more_text.lower() and 'show more' not in more_text.lower():
+                        logger.info(f"Show more button text changed: '{more_text.strip()}', stopping")
                         break
-                    await show_more.click()
-                    load_more_clicks += 1
-                    await page.wait_for_timeout(1500)
+                    
+                    # Прокрутить к кнопке перед кликом
+                    try:
+                        await show_more.first.scroll_into_view_if_needed(timeout=5000)
+                        await page.wait_for_timeout(500)
+                        
+                        # Попробовать обычный клик
+                        try:
+                            await show_more.first.click(timeout=5000)
+                        except Exception:
+                            # Fallback: JavaScript клик (для невидимых элементов)
+                            logger.debug("Regular click failed, trying JS click")
+                            await page.evaluate("""
+                                () => {
+                                    const btn = document.querySelector('button#button-show-more');
+                                    if (btn) btn.click();
+                                }
+                            """)
+                        
+                        load_more_clicks += 1
+                        logger.info(f"Clicked 'показать ещё' #{load_more_clicks}")
+                        
+                        # Ждать дольше после клика
+                        await page.wait_for_timeout(5000)
+                    except Exception as e:
+                        logger.debug(f"Could not click show more: {e}")
+                        # Fallback: прокрутить страницу вниз для lazy loading
+                        logger.debug("Trying scroll down for lazy loading")
+                        await page.evaluate("window.scrollBy(0, window.innerHeight)")
+                        await page.wait_for_timeout(5000)
+                    
                     # Проверить что карточек стало больше — иначе прекратить
                     current_cards = await page.query_selector_all('div.uk-card.uk-card-default.uk-card-small.uk-card-hover')
                     current_count = len(current_cards)
-                    logger.debug(f"Clicked 'показать ещё' (#{load_more_clicks}), cards: {current_count}")
+                    logger.info(f"After attempt #{attempt}: {current_count} cards (prev: {prev_card_count})")
                     if current_count <= prev_card_count:
-                        logger.debug(f"No new cards loaded, stopping pagination")
+                        logger.info(f"No new cards loaded after click #{load_more_clicks}, stopping pagination")
                         break
                     prev_card_count = current_count
+                    
+                    # Небольшая пауза между кликами
+                    await page.wait_for_timeout(1000)
             else:
                 logger.debug(f"Skipping pagination (max_cards={max_cards})")
 
@@ -783,8 +1136,9 @@ class ProjectsService:
                         characteristics=mapped_data.get("characteristics"),
                         url=f"{self.config.vitrina_url}/projects/{final_vitrina_id}",
                     )
-                    # Сохранить teps из sidebar как временный атрибут (fallback для полной страницы)
+                    # Сохранить teps и expertise_nums из sidebar как временные атрибуты
                     project._teps = mapped_data.get("teps")
+                    project._expertise_nums = mapped_data.get("expertise_nums", [])
                     projects.append(project)
                     logger.debug(f"Card {i + 1} parsed: {project.vitrina_id} - {project.object_name}")
 
@@ -911,8 +1265,7 @@ class ProjectsService:
         return filtered
 
     def filter_by_expertise_year(
-        self, projects: List[Project], year_from: Optional[int] = None,
-        year_to: Optional[int] = None
+        self, projects: List[Project], expertise_year: Optional[int] = None
     ) -> List[Project]:
         """
         Отфильтровать проекты по году экспертизы.
@@ -920,33 +1273,24 @@ class ProjectsService:
         Год извлекается из номера экспертизы (последние цифры).
         Формат: XXXX-...-ГГГГ
         """
-        if year_from is None and year_to is None:
-            # Фильтр не задан, возвращаем все
+        if expertise_year is None:
             return projects
 
         filtered = []
         for project in projects:
             if not project.expertise_num:
-                # Нет номера экспертизы — пропускаем
                 continue
 
-            # Извлекаем год из номера экспертизы (последние цифры после последнего дефиса)
             year = self._extract_year_from_expertise(project.expertise_num)
             if year is None:
-                # Не удалось извлечь год — пропускаем
                 continue
 
-            # Проверяем диапазон
-            if year_from and year < year_from:
-                continue
-            if year_to and year > year_to:
-                continue
-
-            filtered.append(project)
+            if year == expertise_year:
+                filtered.append(project)
 
         logger.info(
             f"Filtered {len(projects)} projects to {len(filtered)} "
-            f"(expertise years: {year_from or '—'} - {year_to or '—'})"
+            f"(expertise year: {expertise_year})"
         )
         return filtered
 

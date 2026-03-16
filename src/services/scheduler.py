@@ -7,9 +7,10 @@ from src.browser.session import SessionManager
 from src.config import get_config
 from src.db.database import Database
 from src.db.repository import Repository
+from src.services.egrz import EgrzService
 from src.services.projects import ProjectsService
 from src.services.telegram import TelegramService
-from src.utils.formatters import format_project_notification, format_teps_file
+from src.utils.formatters import format_egrz_file, format_project_notification, format_teps_file
 from src.utils.logger import get_logger
 
 logger = get_logger()
@@ -31,6 +32,7 @@ class SchedulerService:
         self.db = db
         self.repository = repository
         self.projects_service: Optional[ProjectsService] = None
+        self.egrz_service: EgrzService = EgrzService()
         self.scheduler: Optional[AsyncIOScheduler] = None
         self._max_cards: int = 0  # 0 = без ограничения
 
@@ -38,6 +40,7 @@ class SchedulerService:
         """Инициализировать планировщик"""
         self.projects_service = ProjectsService(self.session)
         await self.projects_service.initialize()
+        await self.egrz_service.initialize()
 
         self.scheduler = AsyncIOScheduler()
         self.scheduler.add_job(
@@ -63,6 +66,7 @@ class SchedulerService:
         if self.scheduler:
             self.scheduler.shutdown(wait=True)
             await self.projects_service.close()
+            await self.egrz_service.close()
             logger.info("Scheduler stopped")
 
     async def run_parser(self) -> None:
@@ -79,8 +83,7 @@ class SchedulerService:
             # Получить настройки
             settings = self.repository.get_all_settings()
             last_run_at = settings.last_successful_run
-            year_from = settings.expertise_year_from
-            year_to = settings.expertise_year_to
+            expertise_year = settings.expertise_year
 
             # Получить чаты для отправки уведомлений
             notification_chats = self.repository.get_notification_chats()
@@ -90,7 +93,7 @@ class SchedulerService:
             logger.info("ПАРАМЕТРЫ ЗАПУСКА ПАРСЕРА:")
             logger.info(f"  Категории ({len(settings.filter_categories) if settings.filter_categories else 0}): {settings.filter_categories or 'все'}")
             logger.info(f"  Регионы ({len(settings.filter_regions) if settings.filter_regions else 0}): {settings.filter_regions or 'все'}")
-            logger.info(f"  Год экспертизы: {year_from or '—'} — {year_to or '—'}")
+            logger.info(f"  Год экспертизы: {expertise_year or 'все'}")
             logger.info(f"  Последний успешный запуск: {last_run_at or 'первый запуск'}")
             logger.info(f"  Чаты для уведомлений ({len(chat_ids) if chat_ids else 0}): {chat_ids}")
             logger.info("=" * 60)
@@ -98,23 +101,21 @@ class SchedulerService:
             # Убедиться, что авторизованы
             await self.session.ensure_logged_in()
 
-            # Получить список проектов с серверными фильтрами (категория, регион)
+            # Вычислить список годов для серверной фильтрации
+            expertise_years = [expertise_year] if expertise_year else None
+            if expertise_years:
+                logger.info(f"Expertise years for server-side filter: {expertise_years}")
+
+            # Получить список проектов с серверными фильтрами (категория, регион, год экспертизы)
+            logger.info(f"Calling fetch_list with: categories={settings.filter_categories or None}, regions={settings.filter_regions or None}, expertise_years={expertise_years}")
             projects = await self.projects_service.fetch_list(
                 categories=settings.filter_categories or None,
                 regions=settings.filter_regions or None,
                 max_cards=self._max_cards,
+                expertise_years=expertise_years,
             )
             total_fetched = len(projects)
             logger.info(f"[1/4] ПОЛУЧЕНО с сайта: {total_fetched} объектов")
-
-            # Клиентская фильтрация по году экспертизы
-            if year_from or year_to:
-                projects_before_year = len(projects)
-                projects = self.projects_service.filter_by_expertise_year(
-                    projects, year_from=year_from, year_to=year_to
-                )
-                dropped_by_year = projects_before_year - len(projects)
-                logger.info(f"  После фильтра по году: {len(projects)} объектов (отсеяно: {dropped_by_year})")
 
             # Фильтр по дате последнего запуска
             projects_before_date_filter = len(projects)
@@ -141,6 +142,28 @@ class SchedulerService:
                 elif teps and project.characteristics is None:
                     project.characteristics = dict(teps)
 
+                # Обогащение из ЕГРЗ
+                egrz_results = []
+                expertise_nums = getattr(project, '_expertise_nums', None)
+                if expertise_nums:
+                    try:
+                        egrz_results = await self.egrz_service.fetch_all(expertise_nums)
+                        if egrz_results:
+                            if project.characteristics is None:
+                                project.characteristics = {}
+                            for egrz_item in egrz_results:
+                                for k, v in egrz_item.items():
+                                    if v:
+                                        project.characteristics[f"egrz:{k}"] = v
+                            # Заполнить пустые основные поля из первого результата
+                            first = egrz_results[0]
+                            if not project.expert_org and first.get("Экспертная организация"):
+                                project.expert_org = first["Экспертная организация"]
+                            if not project.tech_customer and first.get("Технический заказчик"):
+                                project.tech_customer = first["Технический заказчик"]
+                    except Exception as e:
+                        logger.warning(f"EGRZ enrichment failed for {project.vitrina_id}: {e}")
+
                 # Логирование карточки проекта
                 logger.info(f"[ОБЪЕКТ] {project.vitrina_id}")
                 logger.info(f"  Название:   {project.object_name or '—'}")
@@ -151,12 +174,13 @@ class SchedulerService:
                 logger.info(f"  Дата:       {project.published_at or project.updated_at or '—'}")
                 logger.info(f"  URL:        {project.url}")
                 logger.info(f"  ТЭП:        {'есть' if teps else 'нет'}")
+                logger.info(f"  ЕГРЗ:       {'есть (' + str(len(egrz_results)) + ')' if egrz_results else 'нет'}")
 
                 # Сохранить в БД (теперь project заполнен)
                 self.repository.save_project(project)
 
                 # Отправить уведомление
-                message = format_project_notification(project, None)
+                message = format_project_notification(project, egrz_results)
                 await self.telegram.send_notification(message, chat_ids)
                 notified_count += 1
 
@@ -164,6 +188,12 @@ class SchedulerService:
                 if teps:
                     file_content = format_teps_file(project, teps)
                     filename = f"teps_{project.vitrina_id}.txt"
+                    await self.telegram.send_file(file_content, filename, chat_ids)
+
+                # Отправить ЕГРЗ файл если есть
+                if egrz_results:
+                    file_content = format_egrz_file(project, egrz_results)
+                    filename = f"egrz_{project.vitrina_id}.txt"
                     await self.telegram.send_file(file_content, filename, chat_ids)
 
                 # Отметить как уведомленный
