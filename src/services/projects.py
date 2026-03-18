@@ -858,8 +858,65 @@ class ProjectsService:
             """)
             logger.debug(f"  Selected values in <select>: {selected_values}")
 
+            # Если клик не сработал — fallback через SlimSelect JS API
+            if not selected_values and values:
+                logger.warning(f"  Click-based selection failed for #{select_id}, retrying via SlimSelect JS API")
+                await self._set_filter_via_slim_api(page, select_id, values)
+
         except Exception as e:
             logger.warning(f"Error setting filter #{select_id}: {e}")
+
+    async def _set_filter_via_slim_api(self, page, select_id: str, values: List[str]) -> None:
+        """Установить фильтр через SlimSelect JS API (fallback если клик не сработал)."""
+        try:
+            result = await page.evaluate(f"""
+                (valuesToSelect) => {{
+                    const select = document.querySelector('#{select_id}');
+                    if (!select || !select.slim) return {{success: false, error: 'no select or slim'}};
+
+                    // Найти значения опций по тексту
+                    const optionValues = [];
+                    for (const opt of select.options) {{
+                        for (const val of valuesToSelect) {{
+                            if (opt.text.trim() === val) {{
+                                optionValues.push(opt.value);
+                            }}
+                        }}
+                    }}
+
+                    if (optionValues.length === 0) return {{success: false, error: 'no matching options'}};
+
+                    // Установить через SlimSelect API
+                    select.slim.setSelected(optionValues);
+
+                    // Проверить результат
+                    const selected = Array.from(select.selectedOptions).map(o => o.value);
+                    return {{success: selected.length > 0, selected: selected}};
+                }}
+            """, values)
+            logger.info(f"  SlimSelect JS API result for #{select_id}: {result}")
+
+            if not result.get('success'):
+                # Последний fallback: напрямую через DOM
+                await page.evaluate(f"""
+                    (valuesToSelect) => {{
+                        const select = document.querySelector('#{select_id}');
+                        if (!select) return;
+                        for (const opt of select.options) {{
+                            opt.selected = false;
+                            for (const val of valuesToSelect) {{
+                                if (opt.text.trim() === val) {{
+                                    opt.selected = true;
+                                }}
+                            }}
+                        }}
+                        select.dispatchEvent(new Event('change', {{bubbles: true}}));
+                    }}
+                """, values)
+                logger.info(f"  Fallback: set filter via direct DOM manipulation for #{select_id}")
+
+        except Exception as e:
+            logger.warning(f"  SlimSelect JS API fallback failed for #{select_id}: {e}")
 
     async def _reset_filters(self, page) -> None:
         """
@@ -880,6 +937,8 @@ class ProjectsService:
             else:
                 # Fallback: перезагрузить страницу
                 logger.debug("Reset button not found, reloading page")
+                await page.reload(wait_until="networkidle", timeout=30000)
+                await page.wait_for_timeout(2000)
         except Exception as e:
             logger.debug(f"Could not reset filters: {e}")
 

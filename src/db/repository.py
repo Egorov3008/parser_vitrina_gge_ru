@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -178,9 +179,12 @@ class Repository:
         params = []
 
         if regions:
-            placeholders = ','.join('?' for _ in regions)
+            # Убираем числовой префикс вида "01. " из названий регионов,
+            # т.к. в БД регионы хранятся без номера
+            clean_regions = [re.sub(r'^\d+\.\s*', '', r) for r in regions]
+            placeholders = ','.join('?' for _ in clean_regions)
             conditions.append(f"region IN ({placeholders})")
-            params.extend(regions)
+            params.extend(clean_regions)
 
         if year_from and year_to:
             # Фильтрация по году из expertise_num (последние 4 цифры = год)
@@ -204,7 +208,7 @@ class Repository:
             ORDER BY created_at DESC
         """
 
-        rows = self.db.fetch_all(query, tuple(params) if params else None)
+        rows = self.db.fetch_all(query, tuple(params))
         return [dict(row) for row in rows] if rows else []
 
     def start_run(self) -> RunLog:

@@ -1604,6 +1604,8 @@ class AdminPanelService:
             export_year_from = data.get('export_year_from')
             export_year_to = data.get('export_year_to')
 
+            logger.info(f"Export full: regions={export_regions}, year_from={export_year_from}, year_to={export_year_to}")
+
             projects = self.repo.get_projects_filtered(
                 regions=export_regions or None,
                 year_from=export_year_from,
@@ -1611,8 +1613,10 @@ class AdminPanelService:
             )
 
             if not projects:
-                await callback.answer("❌ Нет данных для экспорта. Сначала запустите парсинг.", show_alert=True)
+                await callback.message.answer("❌ Нет данных для экспорта. Сначала запустите парсинг.")
                 return
+
+            await callback.message.answer("⏳ Формирую Excel-файл...")
 
             excel_bytes = generate_full_export(projects)
 
@@ -1627,12 +1631,11 @@ class AdminPanelService:
                 caption=caption,
             )
 
-            await callback.answer("✅ Файл отправлен!", show_alert=False)
             logger.info(f"Full Excel export by admin {callback.from_user.id}: {len(projects)} projects")
 
         except Exception as e:
             logger.error(f"Error exporting to Excel: {e}", exc_info=True)
-            await callback.answer(f"❌ Ошибка: {str(e)[:100]}", show_alert=True)
+            await callback.message.answer(f"❌ Ошибка экспорта: {str(e)[:200]}")
 
     async def _perform_export_designers(self, callback: CallbackQuery, state: FSMContext):
         """Экспорт аналитики проектировщиков в Excel"""
@@ -1642,6 +1645,7 @@ class AdminPanelService:
 
             data = await state.get_data()
             export_regions = data.get('export_regions', [])
+            logger.info(f"Export designers: regions={export_regions}, year_from={data.get('export_year_from')}, year_to={data.get('export_year_to')}")
             export_year_from = data.get('export_year_from')
             export_year_to = data.get('export_year_to')
 
@@ -1652,8 +1656,10 @@ class AdminPanelService:
             )
 
             if not projects:
-                await callback.answer("❌ Нет данных для экспорта. Сначала запустите парсинг.", show_alert=True)
+                await callback.message.answer("❌ Нет данных для экспорта. Сначала запустите парсинг.")
                 return
+
+            await callback.message.answer("⏳ Формирую Excel-файл...")
 
             excel_bytes = generate_designers_report(projects)
 
@@ -1668,10 +1674,9 @@ class AdminPanelService:
                 caption=caption,
             )
 
-            await callback.answer("✅ Файл отправлен!", show_alert=False)
             logger.info(f"Designers Excel export by admin {callback.from_user.id}: {len(projects)} projects")
 
         except Exception as e:
             logger.error(f"Error exporting designers report: {e}", exc_info=True)
-            await callback.answer(f"❌ Ошибка: {str(e)[:100]}", show_alert=True)
+            await callback.message.answer(f"❌ Ошибка экспорта: {str(e)[:200]}")
 
