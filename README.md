@@ -5,16 +5,22 @@
 ## Функциональность
 
 - 🔍 **Парсинг проектов** — автоматическая выборка новых объектов по настраиваемым фильтрам
-- 📋 **Фильтрация** — по категориям, регионам и дате публикации
+- 📋 **Фильтрация** — по категориям, регионам, году экспертизы и дате публикации
 - 📱 **Telegram уведомления** — информирование о новых проектах с полной информацией
 - 📊 **Статистика** — отслеживание количества проектов и ошибок
 - ⏱ **Гибкое расписание** — cron-выражения для запуска по расписанию
 - 💾 **SQLite БД** — хранение информации о проектах и логах запусков
+- ⚙️ **Админ-панель** — управление настройками через Telegram
+- 👥 **Мульти-чат поддержка** — уведомления в несколько чатов одновременно
+- 🔐 **Управление учетными данными** — хранение и смена логинов/паролей для портала
+- 🛑 **Остановка парсера** — возможность остановить текущий запуск
+- 📊 **Экспорт в Excel** — выгрузка проектов и проектировщиков в Excel-файлы
 
 ## Требования
 
 - Python 3.11+
 - Chromium браузер (для Playwright)
+- Linux/macOS/Windows
 
 ## Установка
 
@@ -54,6 +60,7 @@ nano .env
 
 ```env
 # Авторизация на портале
+VITRINA_URL=https://vitrina.gge.ru
 VITRINA_LOGIN=your_email@example.com
 VITRINA_PASSWORD=your_password
 
@@ -61,17 +68,21 @@ VITRINA_PASSWORD=your_password
 TELEGRAM_BOT_TOKEN=1234567890:AAExampleToken
 TELEGRAM_CHAT_ID=-1001234567890  # ID чата (с минусом для групп)
 
-# Фильтры (JSON массивы)
-FILTER_CATEGORIES=["Жилые здания","Административные здания"]
-FILTER_REGIONS=["Москва","Московская область"]
-FILTER_DAYS_BACK=1
+# Администраторы (доступ к админ-панели)
+ADMIN_ID=123456789  # Ваш Telegram ID
 
 # Расписание (cron, UTC)
 CRON_SCHEDULE=0 6 * * *  # 6:00 UTC каждый день
 
 # Запуск при старте
 RUN_ON_START=false
+
+# Опционально
+HEADLESS=true
+LOG_LEVEL=INFO
 ```
+
+**Важно:** После первого запуска основные настройки (категории, регионы, год экспертизы, расписание, чаты) можно изменять через админ-панель в Telegram (`/admin`).
 
 ## Использование
 
@@ -85,35 +96,89 @@ python -m src.main
 
 ### Telegram команды
 
-- **`/start`** — приветствие и список команд
-- **`/status`** — информация о последнем запуске
-- **`/run_now`** — запустить парсер немедленно
-- **`/stats`** — статистика проектов и ошибок
-- **`/help`** — справка по командам
+#### Основные команды:
+
+| Команда | Описание |
+|---------|----------|
+| `/start` | Приветствие и список команд |
+| `/status` | Информация о последнем запуске |
+| `/run_now` | Запустить парсер немедленно |
+| `/stop` | Остановить текущий запуск парсера |
+| `/stats` | Статистика проектов и ошибок |
+| `/help` | Справка по командам |
+| `/getChatId` | Получить ID текущего чата |
+
+#### Админ-панель:
+
+| Команда | Описание |
+|---------|----------|
+| `/admin` | Открыть панель управления настройками |
+| `/add_admin <id>` | Добавить администратора (только для админов) |
+
+### Админ-панель
+
+Админ-панель позволяет управлять настройками парсера прямо из Telegram:
+
+- 📁 **Категории** — выбор категорий проектов для фильтрации (25 категорий)
+- 📍 **Регионы** — выбор регионов России (все регионы РФ, 89 шт.)
+- 📅 **Год экспертизы** — фильтр по году экспертизы проекта
+- ⏰ **Расписание** — настройка cron-расписания для автоматического запуска
+- 📱 **Чаты** — управление чатами для уведомлений (мульти-чат поддержка)
+- 👥 **Администраторы** — управление списком администраторов
+- 🔑 **Учетки** — управление учетными данными для портала
+- 📊 **Экспорт в Excel** — выгрузка проектов и проектировщиков
+- 🗑️ **Очистить данные** — очистка базы данных
+
+**Как получить доступ:**
+1. Добавьте свой Telegram ID в `.env` файл: `ADMIN_ID=123456789`
+2. Перезапустите парсер
+3. Отправьте команду `/admin`
+
+**Узнать свой Telegram ID:** напишите боту [@userinfobot](https://t.me/userinfobot)
 
 ### Примеры
 
 **Проверить последний запуск:**
-```bash
+```
 /status
 ```
 
 **Принудительно запустить парсер:**
-```bash
+```
 /run_now
 ```
 
 **Просмотреть статистику:**
-```bash
+```
 /stats
+```
+
+**Остановить текущий парсер:**
+```
+/stop
+```
+
+**Открыть админ-панель:**
+```
+/admin
+```
+
+**Добавить администратора:**
+```
+/add_admin 123456789
+```
+
+**Получить ID чата:**
+```
+/getChatId
 ```
 
 ## Архитектура
 
 ```
 src/
-├── main.py              # Точка входа, Telegram бот
-├── config.py            # Загрузка конфига из .env
+├── main.py              # Точка входа, Telegram бот (aiogram)
+├── config.py            # Загрузка конфига из .env (Pydantic)
 │
 ├── browser/
 │   ├── session.py       # Управление браузер-сессией (Playwright)
@@ -122,11 +187,13 @@ src/
 ├── services/
 │   ├── projects.py      # Парсинг списка и деталей проектов
 │   ├── telegram.py      # Отправка уведомлений в Telegram
-│   └── scheduler.py     # APScheduler и pipeline парсинга
+│   ├── scheduler.py     # APScheduler и pipeline парсинга
+│   ├── admin_panel.py   # Админ-панель для управления настройками
+│   └── egrz.py          # Сервис для работы с ЕГРЗ
 │
 ├── db/
 │   ├── database.py      # Управление SQLite подключением
-│   └── repository.py    # Работа с данными проектов
+│   └── repository.py    # Работа с данными проектов и настроек
 │
 └── utils/
     ├── logger.py        # Loguru настройка
@@ -138,11 +205,12 @@ src/
 | Компонент | Пакет | Версия |
 |-----------|-------|--------|
 | Браузер | `playwright` | >=1.40.0 |
-| Telegram бот | `python-telegram-bot` | >=20.0 |
+| Telegram бот | `aiogram` | >=3.0 |
 | Планировщик | `apscheduler` | >=3.10.4 |
 | Конфиг | `python-dotenv`, `pydantic-settings` | >=1.0, >=2.0 |
 | Логирование | `loguru` | >=0.7.2 |
 | HTTP | `httpx` | >=0.25.0 |
+| Excel | `openpyxl` | >=3.1.0 |
 
 ## База данных
 
@@ -185,6 +253,68 @@ CREATE TABLE run_logs (
 );
 ```
 
+### Таблица `parser_settings`
+
+Хранит настройки парсера:
+
+```sql
+CREATE TABLE parser_settings (
+  id          INTEGER PRIMARY KEY,
+  key         TEXT UNIQUE,
+  value       TEXT,         -- JSON значение
+  description TEXT,
+  updated_at  TEXT
+);
+```
+
+**Ключи настроек:**
+- `filter_categories` — выбранные категории (JSON array)
+- `filter_regions` — выбранные регионы (JSON array)
+- `expertise_year` — год экспертизы (integer)
+- `cron_schedule` — cron-расписание (string)
+
+### Таблица `notification_chats`
+
+Чаты для отправки уведомлений:
+
+```sql
+CREATE TABLE notification_chats (
+  id          INTEGER PRIMARY KEY,
+  chat_id     TEXT UNIQUE,
+  chat_name   TEXT,
+  is_active   INTEGER DEFAULT 1,
+  created_at  TEXT
+);
+```
+
+### Таблица `admins`
+
+Администраторы бота:
+
+```sql
+CREATE TABLE admins (
+  id              INTEGER PRIMARY KEY,
+  telegram_id     TEXT UNIQUE,
+  username        TEXT,
+  created_at      TEXT
+);
+```
+
+### Таблица `credentials`
+
+Учетные данные для портала:
+
+```sql
+CREATE TABLE credentials (
+  id          INTEGER PRIMARY KEY,
+  login       TEXT,
+  password    TEXT,
+  label       TEXT,
+  is_active   INTEGER DEFAULT 0,
+  created_at  TEXT
+);
+```
+
 ## Логирование
 
 Логи сохраняются в `logs/parser-YYYY-MM-DD.log` с ротацией по дням.
@@ -196,6 +326,16 @@ CREATE TABLE run_logs (
 - `ERROR` — ошибки
 - `CRITICAL` — критические ошибки
 
+## Документация
+
+| Файл | Описание |
+|------|----------|
+| [ADMIN_PANEL.md](./ADMIN_PANEL.md) | Полное руководство по админ-панели |
+| [BROWSER_SETUP.md](./BROWSER_SETUP.md) | Настройка браузера и решение проблем |
+| [CHATS_MANAGEMENT.md](./CHATS_MANAGEMENT.md) | Управление чатами уведомлений |
+| [SERVER.md](./SERVER.md) | Руководство по развертыванию на сервере |
+| [QUICKSTART.md](./QUICKSTART.md) | Быстрый старт за 5 минут |
+
 ## Советы и подводные камни
 
 ### 1. Селекторы DOM
@@ -206,7 +346,7 @@ CREATE TABLE run_logs (
 
 ### 2. Авторизация
 
-Сессия автоматически переавторизуется при 401 ошибке API.
+Сессия автоматически переавторизуется при 401 ошибке API. Учетные данные хранятся в БД.
 
 ### 3. Производительность
 
@@ -217,6 +357,12 @@ CREATE TABLE run_logs (
 ### 4. Обработка ошибок
 
 Все ошибки записываются в лог и отправляются в Telegram как оповещение.
+
+### 5. Админ-панель
+
+- Настройки из `.env` используются только при первом запуске
+- После первой настройки все изменения делаются через `/admin`
+- Изменения в `.env` требуют перезапуска парсера
 
 ## Отладка
 
@@ -229,7 +375,23 @@ HEADLESS=false RUN_ON_START=true python -m src.main
 ### Проверка БД
 
 ```bash
+# Количество проектов
 sqlite3 data/vitrina.db "SELECT COUNT(*) FROM projects;"
+
+# Последние проекты
+sqlite3 data/vitrina.db "SELECT object_name, region FROM projects ORDER BY created_at DESC LIMIT 5;"
+
+# Настройки парсера
+sqlite3 data/vitrina.db "SELECT key, value FROM parser_settings;"
+
+# Список админов
+sqlite3 data/vitrina.db "SELECT telegram_id FROM admins;"
+
+# Чаты для уведомлений
+sqlite3 data/vitrina.db "SELECT chat_id, is_active FROM notification_chats;"
+
+# Учетные данные
+sqlite3 data/vitrina.db "SELECT login, is_active FROM credentials;"
 ```
 
 ### Просмотр логов
@@ -238,9 +400,75 @@ sqlite3 data/vitrina.db "SELECT COUNT(*) FROM projects;"
 tail -f logs/parser-$(date +%Y-%m-%d).log
 ```
 
+### Тестирование авторизации
+
+```bash
+HEADLESS=false python -c "
+import asyncio
+from src.browser.session import SessionManager
+async def test():
+    session = SessionManager()
+    await session.initialize()
+    await session.login()
+    print('✅ Login successful!')
+    await session.close()
+asyncio.run(test())
+"
+```
+
+## Развертывание
+
+### Docker
+
+```bash
+docker-compose up -d
+docker-compose logs -f
+```
+
+### systemd (Linux)
+
+```bash
+sudo cp systemd/vitrina-parser.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl start vitrina-parser
+sudo systemctl enable vitrina-parser
+```
+
+Смотрите [SERVER.md](./SERVER.md) для подробной инструкции.
+
 ## Лицензия
 
 MIT License
+
+## Быстрый старт
+
+1. **Установить зависимости:**
+   ```bash
+   pip install -r requirements.txt && playwright install chromium
+   ```
+
+2. **Настроить .env:**
+   ```bash
+   cp .env.example .env
+   # Отредактировать: логин/пароль, токен бота, ADMIN_ID
+   ```
+
+3. **Запустить:**
+   ```bash
+   python -m src.main
+   ```
+
+4. **Настроить через Telegram:**
+   - Отправить `/start`
+   - Открыть `/admin` для настройки фильтров и расписания
+
+## Поддержка
+
+- 📚 [Админ-панель](./ADMIN_PANEL.md) — полное руководство по настройке
+- 🔧 [Настройка браузера](./BROWSER_SETUP.md) — решение проблем с Playwright
+- 📱 [Управление чатами](./CHATS_MANAGEMENT.md) — добавление чатов для уведомлений
+- 🖥️ [Развертывание](./SERVER.md) — запуск на сервере (Docker, systemd)
+- ⚡ [Быстрый старт](./QUICKSTART.md) — запуск за 5 минут
 
 ## Автор
 

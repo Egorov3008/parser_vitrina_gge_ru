@@ -1,159 +1,366 @@
 # Быстрый старт
 
-## За 5 минут
+Запуск парсера Vitrina за 5-10 минут.
 
-### 1. Установить зависимости
+## Вариант 1: Локальный запуск (рекомендуется для тестирования)
+
+### 1. Установка зависимостей (2-3 минуты)
 
 ```bash
 cd /home/claude/vitrina-parser
+
+# Создать виртуальное окружение
+python3.11 -m venv venv
+source venv/bin/activate
+
+# Установить Python зависимости
 pip install -r requirements.txt
+
+# Установить Chromium
 playwright install chromium
 ```
 
-### 2. Настроить переменные окружения
+**Linux:** Установить системные зависимости браузера:
+```bash
+chmod +x install_browser_deps.sh
+sudo bash install_browser_deps.sh
+```
+
+### 2. Настройка конфигурации (2 минуты)
 
 ```bash
+# Скопировать шаблон
 cp .env.example .env
-nano .env  # или вашего любимого редактора
+
+# Отредактировать
+nano .env
 ```
 
 **Минимальная конфигурация:**
 
 ```env
+# Портал vitrina.gge.ru
 VITRINA_LOGIN=your_email@example.com
 VITRINA_PASSWORD=your_password
 
+# Telegram бот
 TELEGRAM_BOT_TOKEN=1234567890:AAExampleToken
 TELEGRAM_CHAT_ID=-1001234567890
+
+# Администратор (вы)
+ADMIN_ID=123456789
 ```
 
-**Как получить Telegram BotToken и ChatID:**
-- Создать бота у [@BotFather](https://t.me/botfather) — получите `TELEGRAM_BOT_TOKEN`
-- Открыть чат с ботом и получить его ID (например через `/start` и проверку логов)
-- Для получения `TELEGRAM_CHAT_ID` группы: добавить бота в группу, отправить сообщение и найти ID в логах
+**Как получить данные:**
 
-### 3. Первый запуск с немедленной проверкой
+| Данные | Где получить | Время |
+|--------|--------------|-------|
+| `VITRINA_LOGIN` | Личный кабинет на vitrina.gge.ru | 1 мин |
+| `VITRINA_PASSWORD` | Личный кабинет на vitrina.gge.ru | - |
+| `TELEGRAM_BOT_TOKEN` | [@BotFather](https://t.me/botfather) | 2 мин |
+| `TELEGRAM_CHAT_ID` | [@userinfobot](https://t.me/userinfobot) | 30 сек |
+| `ADMIN_ID` | [@userinfobot](https://t.me/userinfobot) | 30 сек |
+
+**Пошаговая инструкция для Telegram:**
+
+1. **Создать бота:**
+   - Открыть [@BotFather](https://t.me/botfather)
+   - Отправить `/newbot`
+   - Ввести имя бота (например, "Vitrina Parser")
+   - Ввести username бота (например, "vitrina_parser_bot")
+   - Скопировать токен (выглядит как `1234567890:AAExampleToken`)
+
+2. **Получить ID чата:**
+   - Открыть [@userinfobot](https://t.me/userinfobot)
+   - Нажать "Start"
+   - Скопировать ID (например, `123456789`)
+
+3. **Добавить бота в чат (опционально):**
+   - Создать группу/канал
+   - Добавить бота
+   - Отправить `/getChatId` для получения ID группы
+
+### 3. Первый запуск (1 минута)
 
 ```bash
+# Запустить с немедленной проверкой
 RUN_ON_START=true HEADLESS=false python -m src.main
 ```
 
 **Флаги:**
 - `RUN_ON_START=true` — запустить парсер сразу при старте
-- `HEADLESS=false` — показать браузер (для отладки авторизации)
+- `HEADLESS=false` — показать браузер (видно процесс авторизации)
 
-### 4. Проверить результаты
+**Что происходит:**
+1. Запускается браузер
+2. Происходит авторизация на vitrina.gge.ru
+3. Парсер получает список проектов
+4. Отправляет уведомления в Telegram
+5. Бот переходит в режим ожидания команд
 
-После выполнения:
-1. Проверить БД: `sqlite3 data/vitrina.db "SELECT COUNT(*) FROM projects;"`
-2. Проверить логи: `tail logs/parser-*.log`
-3. В Telegram чате должны прийти уведомления о найденных проектах
+### 4. Проверка результатов
 
-## Типичные проблемы
+**В Telegram:**
+- Бот отправит приветственное сообщение
+- При нахождении проектов — уведомления с деталями
+
+**В логах:**
+```bash
+tail -f logs/parser-*.log
+```
+
+**В базе данных:**
+```bash
+sqlite3 data/vitrina.db "SELECT COUNT(*) FROM projects;"
+sqlite3 data/vitrina.db "SELECT object_name, region FROM projects LIMIT 5;"
+```
+
+---
+
+## Вариант 2: Docker (для продакшена)
+
+### 1. Установка Docker (5 минут)
+
+```bash
+# Ubuntu/Debian
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+
+# Проверка
+docker --version
+docker-compose --version
+```
+
+### 2. Настройка (2 минуты)
+
+```bash
+# Клонировать репозиторий
+git clone <repository-url>
+cd vitrina-parser
+
+# Настроить .env
+cp .env.example .env
+nano .env
+```
+
+### 3. Запуск (1 минута)
+
+```bash
+docker-compose up -d
+```
+
+**Проверка:**
+```bash
+docker-compose ps
+docker-compose logs -f
+```
+
+---
+
+## Вариант 3: systemd (для Linux серверов)
+
+### 1. Установка (5 минут)
+
+```bash
+# Клонировать репозиторий
+cd /opt
+git clone <repository-url> vitrina-parser
+cd vitrina-parser
+
+# Создать venv
+python3.11 -m venv venv
+source venv/bin/activate
+
+# Установить зависимости
+pip install -r requirements.txt
+playwright install chromium
+
+# Системные зависимости
+sudo bash install_browser_deps.sh
+```
+
+### 2. Настройка сервиса (2 минуты)
+
+```bash
+# Скопировать сервис
+sudo cp systemd/vitrina-parser.service /etc/systemd/system/
+
+# Включить и запустить
+sudo systemctl daemon-reload
+sudo systemctl enable vitrina-parser
+sudo systemctl start vitrina-parser
+```
+
+### 3. Проверка
+
+```bash
+sudo systemctl status vitrina-parser
+journalctl -u vitrina-parser -f
+```
+
+---
+
+## Настройка через Telegram
+
+После первого запуска настройте фильтры через админ-панель:
+
+### 1. Открыть админ-панель
+
+Отправить боту:
+```
+/admin
+```
+
+### 2. Настроить фильтры
+
+**Категории:**
+- Нажать "📁 Категории"
+- Выбрать нужные (например, "Жилые объекты")
+- Нажать "✅ Готово"
+
+**Регионы:**
+- Нажать "📍 Регионы"
+- Выбрать нужные (например, "Москва", "Московская область")
+- Нажать "✅ Готово"
+
+**Расписание:**
+- Нажать "⏰ Расписание"
+- Выбрать готовый пресет или настроить вручную
+- Например: "Ежедневно в 06:00"
+
+**Чаты:**
+- Нажать "📱 Чаты"
+- Отправить ID чата (получить через `/getChatId`)
+- Чат добавлен
+
+---
+
+## Типичные проблемы и решения
 
 ### ❌ Ошибка авторизации
 
-**Симптом:** `Login failed - still on login page`
+**Симптом:**
+```
+Login failed - still on login page
+```
 
 **Решение:**
-1. Проверить корректность login/password в `.env`
-2. Запустить с `HEADLESS=false` чтобы увидеть браузер
-3. Проверить селекторы формы входа в `src/browser/session.py` (строки 88-94)
-4. Возможно сайт изменил HTML структуру — обновить селекторы
+1. Проверить логин/пароль в `.env`
+2. Попробовать войти на vitrina.gge.ru вручную
+3. Запустить с `HEADLESS=false` для отладки
+4. Проверить селекторы в `src/browser/session.py`
 
-### ❌ БД ошибка
+---
 
-**Симптом:** `No such table: projects`
+### ❌ Ошибка браузера
+
+**Симптом:**
+```
+chrome-headless-shell: error while loading shared libraries: libnspr4.so
+```
 
 **Решение:**
 ```bash
-# Удалить старую БД
-rm data/vitrina.db
+# Установить зависимости
+sudo bash install_browser_deps.sh
 
-# БД будет создана автоматически при следующем запуске
-python -m src.main
+# Или вручную
+sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0
+
+# Переустановить Chromium
+playwright install chromium
 ```
+
+---
+
+### ❌ Бот не отвечает
+
+**Симптом:** Команды в Telegram не работают
+
+**Решение:**
+1. Проверить токен в `.env`
+2. Проверить логи: `tail -f logs/parser-*.log`
+3. Перезапустить бота
+4. Убедиться, что бот добавлен в чат (если группа)
+
+---
 
 ### ❌ Telegram не получает уведомления
 
-**Симптом:** Логи говорят что уведомления отправлены, но в Telegram ничего
+**Симптом:** Парсер работает, но уведомлений нет
 
 **Решение:**
-1. Проверить `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID`
-2. Убедиться что бот добавлен в чат (если группа)
-3. Проверить логи на ошибки: `grep "Error sending" logs/parser-*.log`
+1. Проверить `TELEGRAM_CHAT_ID` в `.env`
+2. Проверить, что бот добавлен в чат
+3. Проверить логи на ошибки отправки
+4. Использовать `/getChatId` для получения правильного ID
 
-### ❌ Браузер не запускается
+---
 
-**Симптом:** `Failed to initialize browser`
+### ❌ Ошибка БД
+
+**Симптом:**
+```
+No such table: projects
+```
 
 **Решение:**
 ```bash
-# Переустановить chromium
-playwright install chromium --with-deps
+# Удалить старую БД (внимание: все данные будут потеряны!)
+rm data/vitrina.db
 
-# На Linux может потребоваться:
-sudo apt-get install -y libgtk-3-0
+# БД будет создана автоматически
+python -m src.main
 ```
 
-## Регулярный запуск
-
-### На Linux (cron)
-
-```bash
-# Добавить в crontab
-0 6 * * * cd /home/claude/vitrina-parser && python -m src.main >> logs/cron.log 2>&1
-```
-
-### На Windows (Task Scheduler)
-
-1. Открыть "Планировщик задач"
-2. Создать задачу
-3. Action: `python -m src.main`
-4. Working directory: `C:\path\to\vitrina-parser`
-
-### Через systemd (Linux)
-
-Создать `/etc/systemd/system/vitrina-parser.service`:
-
-```ini
-[Unit]
-Description=Vitrina Parser
-After=network.target
-
-[Service]
-Type=simple
-User=claude
-WorkingDirectory=/home/claude/vitrina-parser
-Environment="PATH=/home/claude/vitrina-parser/venv/bin"
-ExecStart=/home/claude/vitrina-parser/venv/bin/python -m src.main
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Затем:
-```bash
-sudo systemctl enable vitrina-parser
-sudo systemctl start vitrina-parser
-sudo systemctl status vitrina-parser
-```
+---
 
 ## Полезные команды
 
-```bash
-# Просмотр логов в реальном времени
-tail -f logs/parser-$(date +%Y-%m-%d).log
+### Управление ботом
 
-# Статистика проектов
+```bash
+# Запустить
+python -m src.main
+
+# Запустить с отладкой
+RUN_ON_START=true HEADLESS=false python -m src.main
+
+# Остановить (Ctrl+C)
+```
+
+### Проверка данных
+
+```bash
+# Количество проектов
+sqlite3 data/vitrina.db "SELECT COUNT(*) FROM projects;"
+
+# Последние проекты
+sqlite3 data/vitrina.db "SELECT object_name, region, published_at FROM projects ORDER BY created_at DESC LIMIT 10;"
+
+# Статистика по категориям
 sqlite3 data/vitrina.db "SELECT category, COUNT(*) as count FROM projects GROUP BY category;"
 
-# Очистить БД (внимание!)
-sqlite3 data/vitrina.db "DELETE FROM projects; DELETE FROM run_logs;"
+# Настройки парсера
+sqlite3 data/vitrina.db "SELECT key, value FROM parser_settings;"
+```
 
-# Тестирование авторизации
+### Логи
+
+```bash
+# Просмотр в реальном времени
+tail -f logs/parser-$(date +%Y-%m-%d).log
+
+# Поиск ошибок
+grep "ERROR" logs/parser-*.log
+
+# Последние 50 строк
+tail -n 50 logs/parser-*.log
+```
+
+### Тестирование авторизации
+
+```bash
 HEADLESS=false python -c "
 import asyncio
 from src.browser.session import SessionManager
@@ -169,10 +376,70 @@ asyncio.run(test())
 "
 ```
 
+---
+
 ## Следующие шаги
 
-1. **Отладить селекторы** — если парсинг не работает, посмотрите селекторы в `src/services/projects.py`
-2. **Настроить фильтры** — отредактируйте `FILTER_CATEGORIES`, `FILTER_REGIONS`, `FILTER_DAYS_BACK` в `.env`
-3. **Добавить больше логирования** — используйте `logger.info()` / `logger.debug()` в своих местах
+После успешного запуска:
+
+1. **Настроить фильтры** через `/admin`
+   - Категории проектов
+   - Регионы
+   - Расписание
+
+2. **Добавить чаты** для уведомлений
+   - Личный чат
+   - Рабочая группа
+   - Канал
+
+3. **Настроить мониторинг**
+   - Проверять логи регулярно
+   - Настроить уведомления об ошибках
+
+4. **Автоматизировать запуск**
+   - Docker для продакшена
+   - systemd для Linux
+   - Cron для периодического запуска
+
+5. **Резервное копирование**
+   - Бэкап БД: `cp data/vitrina.db backup/`
+   - Бэкап `.env` файла
+
+---
+
+## Чек-лист успешной установки
+
+- [ ] Python 3.11+ установлен
+- [ ] Виртуальное окружение создано
+- [ ] Зависимости установлены (`pip install -r requirements.txt`)
+- [ ] Chromium установлен (`playwright install chromium`)
+- [ ] Системные зависимости установлены
+- [ ] `.env` файл настроен
+- [ ] Бот запускается без ошибок
+- [ ] Telegram бот отвечает на `/start`
+- [ ] Парсер находит проекты
+- [ ] Уведомления приходят в Telegram
+- [ ] Админ-панель доступна (`/admin`)
+
+---
+
+## Ресурсы
+
+- [Полная документация](./README.md)
+- [Админ-панель](./ADMIN_PANEL.md)
+- [Настройка браузера](./BROWSER_SETUP.md)
+- [Развертывание на сервере](./SERVER.md)
+- [Управление чатами](./CHATS_MANAGEMENT.md)
+
+---
+
+## Поддержка
+
+При возникновении проблем:
+
+1. Проверьте логи: `tail -f logs/parser-*.log`
+2. Поищите в документации нужную секцию
+3. Проверьте типичные проблемы выше
+4. Откройте issue в репозитории
 
 Удачи! 🚀

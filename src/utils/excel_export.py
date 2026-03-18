@@ -101,7 +101,7 @@ def generate_designers_report(projects: list) -> bytes:
     ws1 = wb.active
     ws1.title = "Проекты"
 
-    headers1 = ["Регион", "Объект", "Проектировщик", "№ экспертизы", "Дата публикации", "URL"]
+    headers1 = ["Регион", "Объект", "Проектировщик", "№ экспертизы", "Дата публикации"]
     for col, header in enumerate(headers1, 1):
         ws1.cell(row=1, column=col, value=header)
     _apply_header_style(ws1, 1, len(headers1))
@@ -118,7 +118,6 @@ def generate_designers_report(projects: list) -> bytes:
         ws1.cell(row=row_idx, column=3, value=designer)
         ws1.cell(row=row_idx, column=4, value=project.get('expertise_num', ''))
         ws1.cell(row=row_idx, column=5, value=project.get('published_at', ''))
-        ws1.cell(row=row_idx, column=6, value=project.get('url', ''))
 
         if designer not in designer_stats:
             designer_stats[designer] = {'count': 0, 'regions': set()}
