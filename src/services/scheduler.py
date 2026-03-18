@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -35,6 +36,8 @@ class SchedulerService:
         self.egrz_service: EgrzService = EgrzService()
         self.scheduler: Optional[AsyncIOScheduler] = None
         self._max_cards: int = 0  # 0 = без ограничения
+        self._cancel_event: asyncio.Event = asyncio.Event()
+        self._running: bool = False
 
     async def initialize(self) -> None:
         """Инициализировать планировщик"""
@@ -42,18 +45,32 @@ class SchedulerService:
         await self.projects_service.initialize()
         await self.egrz_service.initialize()
 
+        # Расписание из БД (админ-панель), fallback на .env
+        db_settings = self.repository.get_all_settings()
+        cron_schedule = db_settings.cron_schedule or self.config.cron_schedule
+
         self.scheduler = AsyncIOScheduler()
         self.scheduler.add_job(
             self.run_parser,
-            trigger=CronTrigger.from_crontab(self.config.cron_schedule),
+            trigger=CronTrigger.from_crontab(cron_schedule),
             id="vitrina_parser",
             name="Vitrina Parser",
             misfire_grace_time=60,
         )
 
         logger.info(
-            f"Scheduler initialized with cron: {self.config.cron_schedule}"
+            f"Scheduler initialized with cron: {cron_schedule}"
         )
+
+    def reschedule(self, cron_expression: str) -> None:
+        """Обновить расписание планировщика"""
+        if not self.scheduler:
+            return
+        self.scheduler.reschedule_job(
+            "vitrina_parser",
+            trigger=CronTrigger.from_crontab(cron_expression),
+        )
+        logger.info(f"Scheduler rescheduled to: {cron_expression}")
 
     def start(self) -> None:
         """Запустить планировщик"""
@@ -69,8 +86,23 @@ class SchedulerService:
             await self.egrz_service.close()
             logger.info("Scheduler stopped")
 
+    @property
+    def is_running(self) -> bool:
+        """Запущен ли парсер в данный момент"""
+        return self._running
+
+    def cancel_parser(self) -> bool:
+        """Запросить остановку текущего парсера. Возвращает True если парсер был запущен."""
+        if not self._running:
+            return False
+        self._cancel_event.set()
+        logger.info("Запрошена остановка парсера")
+        return True
+
     async def run_parser(self) -> None:
         """Основной pipeline парсинга проектов"""
+        self._running = True
+        self._cancel_event.clear()
         run = self.repository.start_run()
         new_count = 0
         notified_count = 0
@@ -127,6 +159,11 @@ class SchedulerService:
             logger.info(f"[3/4] НОВЫХ объектов для обработки: {len(projects)}")
 
             for i, project in enumerate(projects, 1):
+                # Проверка на запрос остановки
+                if self._cancel_event.is_set():
+                    logger.info(f"Парсер остановлен пользователем после {new_count} обработанных объектов")
+                    break
+
                 if self.repository.is_known(project.vitrina_id):
                     logger.debug(f"  ПРОПУЩЕН (уже в БД): {project.vitrina_id} — {project.object_name}")
                     continue
@@ -207,11 +244,16 @@ class SchedulerService:
                     logger.info(f"[4/4] УВЕДОМЛЕНИЕ не отправлено (нет чатов): {project.vitrina_id}")
 
             # Завершить запуск
-            self.repository.finish_run(run.id, "success", new_count)
+            cancelled = self._cancel_event.is_set()
+            status = "cancelled" if cancelled else "success"
+            self.repository.finish_run(run.id, status, new_count)
 
             # Финальная сводка
             logger.info("=" * 60)
-            logger.info(f"ИТОГ: обработано {new_count}/{total_fetched} объектов, отправлено в {len(chat_ids) if chat_ids else 0} чат(ов)")
+            if cancelled:
+                logger.info(f"ИТОГ: парсер ОСТАНОВЛЕН пользователем. Обработано {new_count}/{total_fetched} объектов")
+            else:
+                logger.info(f"ИТОГ: обработано {new_count}/{total_fetched} объектов, отправлено в {len(chat_ids) if chat_ids else 0} чат(ов)")
             logger.info("=" * 60)
 
         except Exception as e:
@@ -221,6 +263,96 @@ class SchedulerService:
             notification_chats = self.repository.get_notification_chats()
             chat_ids = [chat.chat_id for chat in notification_chats] if notification_chats else None
             await self.telegram.send_alert(str(e), chat_ids)
+        finally:
+            self._running = False
+            self._cancel_event.clear()
+
+    async def run_bulk_parse(self, regions: list = None, expertise_years: list = None) -> dict:
+        """Массовый парсинг по заданным фильтрам. Без уведомлений, без фильтра по дате."""
+        self._running = True
+        self._cancel_event.clear()
+        run = self.repository.start_run()
+        new_count = 0
+        skipped_count = 0
+        total_fetched = 0
+
+        try:
+            logger.info("=" * 60)
+            logger.info("МАССОВЫЙ ПАРСИНГ (экспорт)")
+            logger.info(f"  Регионы: {regions or 'все'}")
+            logger.info(f"  Годы экспертизы: {expertise_years or 'все'}")
+            logger.info("=" * 60)
+
+            await self.session.ensure_logged_in()
+
+            projects = await self.projects_service.fetch_list(
+                regions=regions or None,
+                max_cards=0,
+                expertise_years=expertise_years or None,
+            )
+            total_fetched = len(projects)
+            logger.info(f"Получено с сайта: {total_fetched} объектов")
+
+            for i, project in enumerate(projects, 1):
+                if self._cancel_event.is_set():
+                    logger.info(f"Парсер остановлен пользователем после {new_count} обработанных")
+                    break
+
+                if self.repository.is_known(project.vitrina_id):
+                    skipped_count += 1
+                    logger.debug(f"  ПРОПУЩЕН (уже в БД): {project.vitrina_id}")
+                    continue
+
+                # Добавить teps в characteristics
+                teps = getattr(project, '_teps', None)
+                if teps and isinstance(project.characteristics, dict):
+                    project.characteristics.update(teps)
+                elif teps and project.characteristics is None:
+                    project.characteristics = dict(teps)
+
+                # Обогащение из ЕГРЗ
+                expertise_nums = getattr(project, '_expertise_nums', None)
+                if expertise_nums:
+                    try:
+                        egrz_results = await self.egrz_service.fetch_all(expertise_nums)
+                        if egrz_results:
+                            if project.characteristics is None:
+                                project.characteristics = {}
+                            for egrz_item in egrz_results:
+                                for k, v in egrz_item.items():
+                                    if v:
+                                        project.characteristics[f"egrz:{k}"] = v
+                            first = egrz_results[0]
+                            if not project.expert_org and first.get("Экспертная организация"):
+                                project.expert_org = first["Экспертная организация"]
+                            if not project.tech_customer and first.get("Технический заказчик"):
+                                project.tech_customer = first["Технический заказчик"]
+                    except Exception as e:
+                        logger.warning(f"EGRZ enrichment failed for {project.vitrina_id}: {e}")
+
+                self.repository.save_project(project)
+                new_count += 1
+
+                if i % 50 == 0:
+                    logger.info(f"  Обработано {i}/{total_fetched}...")
+
+            cancelled = self._cancel_event.is_set()
+            status = "cancelled" if cancelled else "success"
+            self.repository.finish_run(run.id, status, new_count)
+
+            logger.info("=" * 60)
+            logger.info(f"ИТОГ массового парсинга: всего={total_fetched}, новых={new_count}, пропущено={skipped_count}")
+            logger.info("=" * 60)
+
+            return {"total": total_fetched, "new": new_count, "skipped": skipped_count}
+
+        except Exception as e:
+            logger.error(f"Bulk parse error: {e}", exc_info=True)
+            self.repository.finish_run(run.id, "error", error_msg=str(e))
+            raise
+        finally:
+            self._running = False
+            self._cancel_event.clear()
 
     async def run_immediately(self) -> None:
         """Запустить парсер немедленно (для команды /run_now)"""
