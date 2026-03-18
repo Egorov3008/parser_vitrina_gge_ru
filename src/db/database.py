@@ -115,6 +115,20 @@ class Database:
             """
         )
 
+        # Таблица учетных записей для авторизации
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS credentials (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                login           TEXT UNIQUE NOT NULL,
+                password        TEXT NOT NULL,
+                label           TEXT,
+                is_active       BOOLEAN DEFAULT 0,
+                created_at      TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+
         # Индексы для быстрого поиска
         cursor.execute(
             """
@@ -137,6 +151,38 @@ class Database:
 
         conn.commit()
         logger.info(f"Database schema initialized at {self.db_path}")
+
+    def init_default_settings(self) -> None:
+        """Инициализировать настройки по умолчанию если они не существуют"""
+        conn = self.connect()
+        cursor = conn.cursor()
+
+        # Проверить есть ли уже настройки
+        cursor.execute("SELECT COUNT(*) FROM parser_settings")
+        if cursor.fetchone()[0] > 0:
+            return  # Настройки уже существуют
+
+        # Инициализировать настройки по умолчанию
+        default_settings = [
+            ("filter_categories", "[]", "Фильтр по категориям (JSON массив)"),
+            ("filter_regions", "[]", "Фильтр по регионам (JSON массив)"),
+            ("expertise_year", "", "Год экспертизы — пустое = без фильтра"),
+            ("last_successful_run", "", "Последний успешный запуск"),
+            ("cron_schedule", "0 6 * * *", "Расписание (cron, UTC)"),
+            ("run_on_start", "false", "Запуск при старте"),
+            ("headless", "true", "Режим браузера (headless)"),
+        ]
+
+        cursor.executemany(
+            """
+            INSERT OR IGNORE INTO parser_settings (key, value, description)
+            VALUES (?, ?, ?)
+            """,
+            default_settings,
+        )
+
+        conn.commit()
+        logger.info("Default parser settings initialized")
 
     def execute(self, query: str, params: tuple = ()):
         """Выполнить запрос (INSERT/UPDATE/DELETE)"""

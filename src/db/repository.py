@@ -69,13 +69,24 @@ class NotificationChat:
 
 
 @dataclass
+class Credential:
+    """Модель учетной записи для авторизации"""
+
+    id: Optional[int] = None
+    login: str = ""
+    password: str = ""
+    label: Optional[str] = None
+    is_active: bool = False
+    created_at: Optional[str] = None
+
+
+@dataclass
 class ParserSettings:
     """Группа настроек парсера"""
 
     filter_categories: List[str] = field(default_factory=list)
     filter_regions: List[str] = field(default_factory=list)
-    expertise_year_from: Optional[int] = None
-    expertise_year_to: Optional[int] = None
+    expertise_year: Optional[int] = None
     last_successful_run: Optional[str] = None
     cron_schedule: str = "0 6 * * *"
     run_on_start: bool = False
@@ -159,6 +170,41 @@ class Repository:
             ORDER BY created_at DESC
             """
         )
+        return [dict(row) for row in rows] if rows else []
+
+    def get_projects_filtered(self, regions: list = None, year_from: int = None, year_to: int = None) -> list:
+        """Получить проекты с фильтрацией по регионам и годам экспертизы"""
+        conditions = []
+        params = []
+
+        if regions:
+            placeholders = ','.join('?' for _ in regions)
+            conditions.append(f"region IN ({placeholders})")
+            params.extend(regions)
+
+        if year_from and year_to:
+            # Фильтрация по году из expertise_num (последние 4 цифры = год)
+            year_conditions = []
+            for year in range(year_from, year_to + 1):
+                year_conditions.append("expertise_num LIKE ?")
+                params.append(f"%{year}")
+            conditions.append(f"({' OR '.join(year_conditions)})")
+        elif year_from:
+            conditions.append("expertise_num LIKE ?")
+            params.append(f"%{year_from}")
+        elif year_to:
+            conditions.append("expertise_num LIKE ?")
+            params.append(f"%{year_to}")
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT * FROM projects
+            {where_clause}
+            ORDER BY created_at DESC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params) if params else None)
         return [dict(row) for row in rows] if rows else []
 
     def start_run(self) -> RunLog:
@@ -283,10 +329,11 @@ class Repository:
                     settings.filter_categories = json.loads(value) if value else []
                 elif key == "filter_regions":
                     settings.filter_regions = json.loads(value) if value else []
-                elif key == "expertise_year_from":
-                    settings.expertise_year_from = int(value) if value else None
-                elif key == "expertise_year_to":
-                    settings.expertise_year_to = int(value) if value else None
+                elif key == "expertise_year":
+                    settings.expertise_year = int(value) if value else None
+                # Backward compat: map old range keys to single year
+                elif key == "expertise_year_from" and not settings.expertise_year:
+                    settings.expertise_year = int(value) if value else None
                 elif key == "last_successful_run":
                     settings.last_successful_run = value if value else None
                 elif key == "cron_schedule":
@@ -311,14 +358,9 @@ class Repository:
             "Фильтр по регионам",
         )
         self.set_setting(
-            "expertise_year_from",
-            str(settings.expertise_year_from) if settings.expertise_year_from else "",
-            "Год экспертизы (от)",
-        )
-        self.set_setting(
-            "expertise_year_to",
-            str(settings.expertise_year_to) if settings.expertise_year_to else "",
-            "Год экспертизы (до)",
+            "expertise_year",
+            str(settings.expertise_year) if settings.expertise_year else "",
+            "Год экспертизы",
         )
         self.set_setting(
             "last_successful_run",
@@ -404,6 +446,21 @@ class Repository:
         self.db.execute("DELETE FROM notification_chats WHERE chat_id = ?", (chat_id,))
         logger.info(f"Notification chat removed: {chat_id}")
 
+    def toggle_notification_chat(self, chat_id: str) -> bool:
+        """Переключить активность чата. Возвращает новое состояние."""
+        row = self.db.fetch_one(
+            "SELECT is_active FROM notification_chats WHERE chat_id = ?", (chat_id,)
+        )
+        if row is None:
+            return False
+        new_state = not bool(row["is_active"])
+        self.db.execute(
+            "UPDATE notification_chats SET is_active = ? WHERE chat_id = ?",
+            (1 if new_state else 0, chat_id),
+        )
+        logger.info(f"Notification chat {chat_id} toggled to {'active' if new_state else 'inactive'}")
+        return new_state
+
     def get_notification_chats(self) -> List[NotificationChat]:
         """Получить список активных чатов для отправки"""
         rows = self.db.fetch_all(
@@ -429,6 +486,70 @@ class Repository:
                 chat_id=row["chat_id"],
                 chat_name=row["chat_name"],
                 is_active=row["is_active"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    # ========== Учетные записи ==========
+
+    def add_credential(self, login: str, password: str, label: Optional[str] = None) -> None:
+        """Добавить учетную запись"""
+        try:
+            self.db.execute(
+                """
+                INSERT INTO credentials (login, password, label)
+                VALUES (?, ?, ?)
+                ON CONFLICT(login) DO UPDATE SET
+                    password = excluded.password,
+                    label = excluded.label
+                """,
+                (login, password, label),
+            )
+            logger.info(f"Credential added: {login} ({label})")
+        except Exception as e:
+            logger.error(f"Error adding credential {login}: {e}")
+            raise
+
+    def remove_credential(self, credential_id: int) -> None:
+        """Удалить учетную запись"""
+        self.db.execute("DELETE FROM credentials WHERE id = ?", (credential_id,))
+        logger.info(f"Credential removed: id={credential_id}")
+
+    def set_active_credential(self, credential_id: int) -> None:
+        """Установить активную учетную запись (деактивировать остальные)"""
+        self.db.execute("UPDATE credentials SET is_active = 0")
+        self.db.execute(
+            "UPDATE credentials SET is_active = 1 WHERE id = ?", (credential_id,)
+        )
+        logger.info(f"Active credential set: id={credential_id}")
+
+    def get_active_credential(self) -> Optional[Credential]:
+        """Получить активную учетную запись"""
+        row = self.db.fetch_one(
+            "SELECT * FROM credentials WHERE is_active = 1 LIMIT 1"
+        )
+        if row:
+            return Credential(
+                id=row["id"],
+                login=row["login"],
+                password=row["password"],
+                label=row["label"],
+                is_active=bool(row["is_active"]),
+                created_at=row["created_at"],
+            )
+        return None
+
+    def get_all_credentials(self) -> List[Credential]:
+        """Получить все учетные записи"""
+        rows = self.db.fetch_all("SELECT * FROM credentials ORDER BY is_active DESC, created_at DESC")
+        return [
+            Credential(
+                id=row["id"],
+                login=row["login"],
+                password=row["password"],
+                label=row["label"],
+                is_active=bool(row["is_active"]),
                 created_at=row["created_at"],
             )
             for row in rows
