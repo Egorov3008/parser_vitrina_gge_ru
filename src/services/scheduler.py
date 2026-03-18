@@ -217,7 +217,8 @@ class SchedulerService:
                 self.repository.save_project(project)
 
                 # Отправить уведомление
-                message = format_project_notification(project, egrz_results)
+                expertise_links = getattr(project, '_expertise_links', None)
+                message = format_project_notification(project, egrz_results, expertise_links)
                 await self.telegram.send_notification(message, chat_ids)
                 notified_count += 1
 

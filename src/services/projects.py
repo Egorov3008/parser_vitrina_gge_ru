@@ -47,6 +47,7 @@ JS_EXTRACT_BY_IDS = """
         developer: null,
         expertise_num: null,
         expertise_nums: [],
+        expertise_links: [],
         characteristics: {},
         teps: {}
     };
@@ -80,8 +81,12 @@ JS_EXTRACT_BY_IDS = """
         const links = conclusionsEl.querySelectorAll('a');
         links.forEach((link, idx) => {
             const text = link.innerText.trim();
+            const href = link.href || '';
             if (text) {
                 result.expertise_nums.push(text);
+                if (href) {
+                    result.expertise_links.push({num: text, url: href});
+                }
                 if (idx === 0) {
                     result.expertise_num = text;  // первый номер
                 }
@@ -959,6 +964,7 @@ class ProjectsService:
             "characteristics": characteristics if characteristics else None,
             "teps": teps if teps else None,
             "expertise_nums": data.get("expertise_nums", []),
+            "expertise_links": data.get("expertise_links", []),
         }
 
     async def _parse_cards_from_search_page(self, page, max_cards: int = 0) -> List[Project]:
@@ -1136,9 +1142,10 @@ class ProjectsService:
                         characteristics=mapped_data.get("characteristics"),
                         url=f"{self.config.vitrina_url}/projects/{final_vitrina_id}",
                     )
-                    # Сохранить teps и expertise_nums из sidebar как временные атрибуты
+                    # Сохранить teps, expertise_nums и expertise_links из sidebar как временные атрибуты
                     project._teps = mapped_data.get("teps")
                     project._expertise_nums = mapped_data.get("expertise_nums", [])
+                    project._expertise_links = mapped_data.get("expertise_links", [])
                     projects.append(project)
                     logger.debug(f"Card {i + 1} parsed: {project.vitrina_id} - {project.object_name}")
 

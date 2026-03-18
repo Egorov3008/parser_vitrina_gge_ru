@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 from src.db.repository import Project
 
 
-def format_project_notification(project: Project, egrz_results: Optional[List[Dict]] = None) -> str:
+def format_project_notification(project: Project, egrz_results: Optional[List[Dict]] = None, expertise_links: Optional[List[Dict]] = None) -> str:
     """Форматировать уведомление о новом проекте в HTML для Telegram"""
 
     html = "🏗 <b>Новый проект на Витрине ГГЭ</b>\n\n"
@@ -52,9 +52,14 @@ def format_project_notification(project: Project, egrz_results: Optional[List[Di
             html += f"\n📊 <b>Данные ЕГРЗ:</b>\n"
             html += "\n".join(egrz_lines) + "\n"
 
-    # Ссылка на проект
-    if project.url:
-        html += f"\n🔗 <a href=\"{project.url}\">Ссылка на проект</a>"
+    # Ссылки на заключения экспертизы (из sidebar)
+    if expertise_links:
+        html += "\n"
+        for link in expertise_links:
+            num = escape_html(link.get("num", ""))
+            url = link.get("url", "")
+            if num and url:
+                html += f"🔗 <a href=\"{url}\">{num}</a>\n"
 
     return html
 
