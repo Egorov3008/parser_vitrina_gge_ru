@@ -11,5 +11,5 @@ logs/
 *.md
 *.html
 *.png
-*.txt
+!requirements.txt
 .qwen/
