@@ -7,16 +7,16 @@ from src.db.repository import Project
 def format_project_notification(project: Project, egrz_results: Optional[List[Dict]] = None) -> str:
     """Форматировать уведомление о новом проекте в HTML для Telegram"""
 
-    html = "🏗️ <b>Новый проект</b>\n\n"
+    html = "🏗 <b>Новый проект на Витрине ГГЭ</b>\n\n"
 
     if project.expertise_num:
         html += f"📋 <b>Номер экспертизы:</b> {escape_html(project.expertise_num)}\n"
 
     if project.object_name:
-        html += f"📍 <b>Объект:</b> {escape_html(project.object_name)}\n"
+        html += f"🏠 <b>Объект:</b> {escape_html(project.object_name)}\n"
 
     if project.expert_org:
-        html += f"🏢 <b>Экспертная организация:</b> {escape_html(project.expert_org)}\n"
+        html += f"🏛 <b>Экспертная организация:</b> {escape_html(project.expert_org)}\n"
 
     if project.developer:
         html += f"👷 <b>Застройщик:</b> {escape_html(project.developer)}\n"
@@ -24,14 +24,24 @@ def format_project_notification(project: Project, egrz_results: Optional[List[Di
     if project.tech_customer:
         html += f"🔧 <b>Технический заказчик:</b> {escape_html(project.tech_customer)}\n"
 
+    if project.category:
+        html += f"📂 <b>Категория:</b> {escape_html(project.category)}\n"
+
+    if project.region:
+        html += f"📍 <b>Регион:</b> {escape_html(project.region)}\n"
+
+    date = project.published_at or project.updated_at
+    if date:
+        html += f"📅 <b>Дата публикации:</b> {escape_html(str(date))}\n"
+
     # Данные ЕГРЗ
     if egrz_results:
         first = egrz_results[0]
         egrz_fields = [
-            ("Результат экспертизы", "Результат"),
-            ("Вид экспертизы", "Вид экспертизы"),
-            ("Адрес объекта", "Адрес"),
-            ("Проектировщик", "Проектировщик"),
+            ("Результат экспертизы", "✅ Результат"),
+            ("Вид экспертизы", "📝 Вид экспертизы"),
+            ("Адрес объекта", "📍 Адрес"),
+            ("Проектировщик", "✏️ Проектировщик"),
         ]
         egrz_lines = []
         for api_key, label in egrz_fields:
@@ -44,7 +54,7 @@ def format_project_notification(project: Project, egrz_results: Optional[List[Di
 
     # Ссылка на проект
     if project.url:
-        html += f"\n🔗 <a href=\"{project.url}\">На портале</a>"
+        html += f"\n🔗 <a href=\"{project.url}\">Ссылка на проект</a>"
 
     return html
 
