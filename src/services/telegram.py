@@ -101,6 +101,7 @@ class TelegramService:
             BotCommand(command="admin", description="Админ-панель"),
             BotCommand(command="status", description="Последний запуск парсера"),
             BotCommand(command="run_now", description="Запустить парсер немедленно"),
+            BotCommand(command="stop", description="Остановить парсер"),
             BotCommand(command="stats", description="Статистика проектов"),
             BotCommand(command="help", description="Справка по командам"),
         ]
@@ -130,6 +131,25 @@ class TelegramService:
                 )
             except Exception as e:
                 logger.error(f"Error sending file to {chat_id}: {e}")
+
+    async def send_binary_file(self, file_bytes: bytes, filename: str, chat_ids: Optional[List[str]] = None, caption: Optional[str] = None) -> None:
+        """Отправить бинарный файл (Excel, etc.)"""
+        from aiogram.types import BufferedInputFile
+
+        target_chats = chat_ids if chat_ids else [self.chat_id]
+
+        for chat_id in target_chats:
+            try:
+                input_file = BufferedInputFile(file_bytes, filename=filename)
+
+                await self.bot.send_document(
+                    chat_id=chat_id,
+                    document=input_file,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML if caption else None,
+                )
+            except Exception as e:
+                logger.error(f"Error sending binary file to {chat_id}: {e}")
 
     async def close(self) -> None:
         """Закрыть сессию бота"""
