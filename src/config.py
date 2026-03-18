@@ -1,7 +1,3 @@
-import json
-from pathlib import Path
-from typing import List
-
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -18,10 +14,6 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str
     telegram_chat_id: str = None
-
-    # Фильтры (JSON)
-    filter_categories: List[str] = []
-    filter_regions: List[str] = []
 
     # Расписание
     cron_schedule: str = "0 6 * * *"
@@ -49,21 +41,10 @@ class Settings(BaseSettings):
 
     @classmethod
     def from_env(cls) -> "Settings":
-        """Загрузить конфиг из .env с парсингом JSON полей"""
+        """Загрузить конфиг из .env"""
         import os
 
         load_dotenv()
-
-        # Парсить JSON массивы
-        categories_str = os.getenv("FILTER_CATEGORIES", "[]")
-        regions_str = os.getenv("FILTER_REGIONS", "[]")
-
-        try:
-            categories = json.loads(categories_str)
-            regions = json.loads(regions_str)
-        except json.JSONDecodeError:
-            categories = []
-            regions = []
 
         # Парсить булевы значения
         headless_str = os.getenv("HEADLESS", "true").lower()
@@ -81,12 +62,10 @@ class Settings(BaseSettings):
             headless=headless,
             run_on_start=run_on_start,
         )
-        instance.filter_categories = categories
-        instance.filter_regions = regions
-        instance.admin_id = ",".join(admin_ids)  # Сохраняем как строку
+        instance.admin_id = ",".join(admin_ids)
         return instance
 
-    def get_admin_ids(self) -> List[str]:
+    def get_admin_ids(self) -> list[str]:
         """Получить список ID администраторов"""
         if not self.admin_id:
             return []
