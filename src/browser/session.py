@@ -29,6 +29,24 @@ class SessionManager:
         self.page: Optional[Page] = None
         self.api_token: Optional[str] = None
         self.is_logged_in = False
+        self._login_override: Optional[str] = None
+        self._password_override: Optional[str] = None
+
+    def set_credentials(self, login: str, password: str) -> None:
+        """Установить учетные данные для авторизации (из БД)"""
+        self._login_override = login
+        self._password_override = password
+        # Сбросить текущую сессию, чтобы при следующем запросе залогинился с новыми данными
+        self.is_logged_in = False
+        logger.info(f"Credentials set: {login}")
+
+    @property
+    def _login(self) -> str:
+        return self._login_override or self._login
+
+    @property
+    def _password(self) -> str:
+        return self._password_override or self._password
 
     async def initialize(self) -> None:
         """Инициализировать браузер"""
@@ -105,8 +123,8 @@ class SessionManager:
                 await self._try_alternative_login()
                 return
 
-            await login_field.fill(self.config.vitrina_login)
-            await password_field.fill(self.config.vitrina_password)
+            await login_field.fill(self._login)
+            await password_field.fill(self._password)
 
             # Нажать кнопку входа
             await submit_button.click()
@@ -136,10 +154,10 @@ class SessionManager:
             await self.page.wait_for_selector('#modal-auth', state='visible', timeout=5000)
 
             await self.page.locator('#form-login-text').fill(
-                self.config.vitrina_login, timeout=5000
+                self._login, timeout=5000
             )
             await self.page.locator('#form-passwd-text').fill(
-                self.config.vitrina_password, timeout=5000
+                self._password, timeout=5000
             )
             await self.page.locator('#login-button-id').click()
 
