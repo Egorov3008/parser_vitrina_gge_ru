@@ -261,3 +261,5 @@ LOG_LEVEL=DEBUG python run_parser_standalone.py
 - **BROWSER_SETUP.md** — fixes for Playwright/Chromium system dependencies
 - **IMPLEMENTATION_SUMMARY.md** — historical notes on implementation decisions
 - **.env.example** — template for configuration variables
+
+Проект русскоязычный. Отвечай по русски на запросы пользователя.
