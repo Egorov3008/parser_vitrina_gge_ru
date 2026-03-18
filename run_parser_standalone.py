@@ -16,7 +16,7 @@ from src.db.database import Database
 from src.db.repository import Repository
 from src.services.scheduler import SchedulerService
 from src.services.telegram import TelegramService
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, setup_logger
 
 logger = get_logger()
 
@@ -29,6 +29,8 @@ async def main():
     sched = None
 
     try:
+        # Настроить логирование
+        setup_logger()
         logger.info("=" * 60)
         logger.info("ЗАПУСК ПАРСЕРА В РЕЖИМЕ STANDALONE")
         logger.info("=" * 60)
@@ -38,11 +40,39 @@ async def main():
         # Инициализировать БД
         db = Database(config.db_path)
         db.init_schema()
+        db.init_default_settings()
         repository = Repository(db)
+
+        # Мигрировать TELEGRAM_CHAT_ID из .env в таблицу notification_chats
+        if config.telegram_chat_id:
+            existing_chats = repository.get_all_notification_chats()
+            if not existing_chats:
+                for chat_id in config.telegram_chat_id.split(","):
+                    chat_id = chat_id.strip()
+                    if chat_id:
+                        repository.add_notification_chat(chat_id, "из .env")
+                        logger.info(f"Migrated TELEGRAM_CHAT_ID to notification_chats: {chat_id}")
+
+        # Мигрировать учетные данные из .env в таблицу credentials
+        existing_credentials = repository.get_all_credentials()
+        if not existing_credentials:
+            repository.add_credential(config.vitrina_login, config.vitrina_password, "из .env")
+            creds = repository.get_all_credentials()
+            if creds:
+                repository.set_active_credential(creds[0].id)
+            logger.info(f"Migrated credentials from .env: {config.vitrina_login}")
+
         logger.info("Database initialized")
 
         # Инициализировать браузер
         session = SessionManager()
+
+        # Установить активную учетку из БД
+        active_cred = repository.get_active_credential()
+        if active_cred:
+            session.set_credentials(active_cred.login, active_cred.password)
+            logger.info(f"Using credential from DB: {active_cred.login}")
+
         await session.initialize()
         logger.info("Browser session initialized")
 

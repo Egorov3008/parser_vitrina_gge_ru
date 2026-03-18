@@ -46,6 +46,7 @@ async def start_command(message: Message) -> None:
         "🔧 <b>Основные команды:</b>\n"
         "/status - статус последнего запуска\n"
         "/run_now - запустить парсер сейчас\n"
+        "/stop - остановить парсер\n"
         "/stats - статистика проектов\n"
         "/admin - панель настроек (администраторам)\n"
         "/getChatId - получить ID текущего чата\n\n"
@@ -129,7 +130,7 @@ async def run_now_command(message: Message) -> None:
 
     # Отправляем сообщение о запуске
     text = "⏳ <b>Запуск парсера...</b>"
-    keyboard = [[InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status")]]
+    keyboard = [[InlineKeyboardButton(text="🛑 Остановить", callback_data="cmd_stop")]]
     reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     msg = await message.answer(text, reply_markup=reply_markup)
@@ -186,6 +187,40 @@ async def stats_command(message: Message) -> None:
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
+async def stop_command(message: Message) -> None:
+    """Команда /stop - остановить текущий парсер"""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    user_id = message.from_user.id
+    logger.info(f"User {user_id} executed /stop command")
+
+    if not scheduler:
+        await message.answer("❌ Планировщик не инициализирован")
+        return
+
+    if not scheduler.is_running:
+        keyboard = [[InlineKeyboardButton(text="🚀 Запустить парсер", callback_data="cmd_run_now")]]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+        await message.answer(
+            "ℹ️ Парсер сейчас не запущен.",
+            reply_markup=reply_markup,
+        )
+        return
+
+    cancelled = scheduler.cancel_parser()
+    if cancelled:
+        keyboard = [[InlineKeyboardButton(text="📊 Статус", callback_data="cmd_status")]]
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+        await message.answer(
+            "🛑 <b>Остановка парсера запрошена.</b>\n\n"
+            "Парсер остановится после завершения обработки текущего объекта.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+        )
+    else:
+        await message.answer("ℹ️ Парсер сейчас не запущен.")
+
+
 async def help_command(message: Message) -> None:
     """Команда /help - справка"""
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -204,6 +239,8 @@ async def help_command(message: Message) -> None:
         "Показать информацию о последнем запуске парсера\n\n"
         "<b>/run_now</b>\n"
         "Запустить парсер немедленно (вне расписания)\n\n"
+        "<b>/stop</b>\n"
+        "Остановить текущий запуск парсера\n\n"
         "<b>/stats</b>\n"
         "Статистика проектов в базе данных\n\n"
         "<b>/getChatId</b>\n"
@@ -379,8 +416,35 @@ async def initialize_services() -> tuple:
         repository.add_admin(admin_id, "config")
     logger.info(f"Admins synced from config: {config.get_admin_ids()}")
 
+    # Мигрировать TELEGRAM_CHAT_ID из .env в таблицу notification_chats
+    if config.telegram_chat_id:
+        existing_chats = repository.get_all_notification_chats()
+        if not existing_chats:
+            for chat_id in config.telegram_chat_id.split(","):
+                chat_id = chat_id.strip()
+                if chat_id:
+                    repository.add_notification_chat(chat_id, "из .env")
+                    logger.info(f"Migrated TELEGRAM_CHAT_ID to notification_chats: {chat_id}")
+
+    # Мигрировать учетные данные из .env в таблицу credentials
+    existing_credentials = repository.get_all_credentials()
+    if not existing_credentials:
+        repository.add_credential(config.vitrina_login, config.vitrina_password, "из .env")
+        # Сделать первую учетку активной
+        creds = repository.get_all_credentials()
+        if creds:
+            repository.set_active_credential(creds[0].id)
+        logger.info(f"Migrated credentials from .env: {config.vitrina_login}")
+
     # Браузер
     session = SessionManager()
+
+    # Установить активную учетку из БД
+    active_cred = repository.get_active_credential()
+    if active_cred:
+        session.set_credentials(active_cred.login, active_cred.password)
+        logger.info(f"Using credential from DB: {active_cred.login}")
+
     await session.initialize()
 
     # Telegram
@@ -418,13 +482,19 @@ async def main():
     dp = None
 
     try:
+        # Настроить логирование
+        setup_logger()
+        logger.info("=" * 60)
+        logger.info("ЗАПУСК БОТА")
+        logger.info("=" * 60)
+
         # Инициализировать сервисы
         db, repository, session, telegram, sched = await initialize_services()
 
         # Обновить глобальные переменные
         global scheduler, admin_panel
         scheduler = sched
-        admin_panel = AdminPanelService(repository)
+        admin_panel = AdminPanelService(repository, scheduler=sched)
 
         # Создать Bot и Dispatcher
         config = get_config()
@@ -459,6 +529,10 @@ async def main():
         async def cmd_stats(msg: Message):
             await stats_command(msg)
 
+        @router.message(Command("stop"))
+        async def cmd_stop(msg: Message):
+            await stop_command(msg)
+
         @router.message(Command("help"))
         async def cmd_help(msg: Message):
             await help_command(msg)
@@ -487,8 +561,8 @@ async def main():
         async def cb_run_now(callback: CallbackQuery):
             user_id = callback.from_user.id
             logger.info(f"User {user_id} clicked cmd_run_now button")
-            await run_now_command(callback.message)
             await callback.answer()
+            await run_now_command(callback.message)
 
         @router.callback_query(F.data == "cmd_stats")
         async def cb_stats(callback: CallbackQuery):
@@ -496,6 +570,13 @@ async def main():
             logger.info(f"User {user_id} clicked cmd_stats button")
             await stats_command(callback.message)
             await callback.answer()
+
+        @router.callback_query(F.data == "cmd_stop")
+        async def cb_stop(callback: CallbackQuery):
+            user_id = callback.from_user.id
+            logger.info(f"User {user_id} clicked cmd_stop button")
+            await callback.answer()
+            await stop_command(callback.message)
 
         @router.callback_query(F.data == "cmd_help")
         async def cb_help(callback: CallbackQuery):
@@ -527,7 +608,7 @@ async def main():
                 await callback.message.edit_text(text, parse_mode=ParseMode.HTML)
             else:
                 # Show admin panel menu
-                await admin_panel.show_admin_menu(callback.message, state)
+                await admin_panel.show_admin_menu(callback.message, state, user_id=user_id)
 
             await callback.answer()
 
