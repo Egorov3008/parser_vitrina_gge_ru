@@ -179,9 +179,11 @@ class Repository:
         params = []
 
         if categories:
-            placeholders = ','.join('?' for _ in categories)
-            conditions.append(f"category IN ({placeholders})")
-            params.extend(categories)
+            cat_conditions = []
+            for cat in categories:
+                cat_conditions.append("category LIKE ?")
+                params.append(f"%{cat}%")
+            conditions.append(f"({' OR '.join(cat_conditions)})")
 
         if regions:
             # Убираем числовой префикс вида "01. " из названий регионов,
