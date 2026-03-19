@@ -68,7 +68,7 @@ def generate_full_export(projects: list) -> bytes:
 
     headers = [
         "ID", "№ экспертизы", "Объект", "Регион", "Категория",
-        "Проектировщик", "Дата публикации", "URL",
+        "Застройщик", "Проектировщик", "Дата публикации", "URL",
     ]
 
     for col, header in enumerate(headers, 1):
@@ -82,9 +82,10 @@ def generate_full_export(projects: list) -> bytes:
         ws.cell(row=row_idx, column=3, value=project.get('object_name', ''))
         ws.cell(row=row_idx, column=4, value=project.get('region', ''))
         ws.cell(row=row_idx, column=5, value=project.get('category', ''))
-        ws.cell(row=row_idx, column=6, value=get_designer(project))
-        ws.cell(row=row_idx, column=7, value=project.get('published_at', ''))
-        ws.cell(row=row_idx, column=8, value=project.get('url', ''))
+        ws.cell(row=row_idx, column=6, value=project.get('developer', ''))
+        ws.cell(row=row_idx, column=7, value=get_designer(project))
+        ws.cell(row=row_idx, column=8, value=project.get('published_at', ''))
+        ws.cell(row=row_idx, column=9, value=project.get('url', ''))
 
     _auto_width(ws)
 
@@ -101,7 +102,7 @@ def generate_designers_report(projects: list) -> bytes:
     ws1 = wb.active
     ws1.title = "Проекты"
 
-    headers1 = ["Регион", "Категория", "Объект", "Проектировщик", "№ экспертизы", "Дата публикации"]
+    headers1 = ["Регион", "Категория", "Объект", "Застройщик", "Проектировщик", "№ экспертизы", "Дата публикации"]
     for col, header in enumerate(headers1, 1):
         ws1.cell(row=1, column=col, value=header)
     _apply_header_style(ws1, 1, len(headers1))
@@ -116,9 +117,10 @@ def generate_designers_report(projects: list) -> bytes:
         ws1.cell(row=row_idx, column=1, value=region)
         ws1.cell(row=row_idx, column=2, value=project.get('category', ''))
         ws1.cell(row=row_idx, column=3, value=project.get('object_name', ''))
-        ws1.cell(row=row_idx, column=4, value=designer)
-        ws1.cell(row=row_idx, column=5, value=project.get('expertise_num', ''))
-        ws1.cell(row=row_idx, column=6, value=project.get('published_at', ''))
+        ws1.cell(row=row_idx, column=4, value=project.get('developer', ''))
+        ws1.cell(row=row_idx, column=5, value=designer)
+        ws1.cell(row=row_idx, column=6, value=project.get('expertise_num', ''))
+        ws1.cell(row=row_idx, column=7, value=project.get('published_at', ''))
 
         if designer not in designer_stats:
             designer_stats[designer] = {'count': 0, 'regions': set()}
