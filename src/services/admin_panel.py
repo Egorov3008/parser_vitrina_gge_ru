@@ -46,6 +46,7 @@ CALLBACK_EXPORT_YEARS = "admin_export_years"
 CALLBACK_EXPORT_RUN_PARSE = "admin_export_run_parse"
 CALLBACK_EXPORT_FULL = "admin_export_full"
 CALLBACK_EXPORT_DESIGNERS = "admin_export_designers"
+CALLBACK_EXPORT_CATEGORIES = "admin_export_categories"
 CALLBACK_CREDENTIALS = "admin_credentials"
 CALLBACK_ADD_CREDENTIAL = "admin_add_cred"
 CALLBACK_REMOVE_CREDENTIAL = "admin_remove_cred"
@@ -362,6 +363,17 @@ class AdminPanelService:
             await self._perform_clear_data(callback)
         elif data == CALLBACK_EXPORT or data == CALLBACK_EXPORT_MENU:
             await self._show_export_menu(callback, state)
+        elif data == CALLBACK_EXPORT_CATEGORIES:
+            await self._show_export_categories_menu(callback, state)
+        elif data.startswith("expcat:"):
+            cat_index = int(data[7:])
+            await self._handle_export_category_toggle(callback, state, cat_index)
+        elif data.startswith("expcatpage:"):
+            page = int(data[11:])
+            await self._show_export_categories_menu(callback, state, page)
+        elif data == "expcat_reset":
+            await state.update_data(export_categories=[])
+            await self._show_export_categories_menu(callback, state)
         elif data == CALLBACK_EXPORT_REGIONS:
             await self._show_export_regions_menu(callback, state)
         elif data.startswith("expreg:"):
@@ -1379,16 +1391,19 @@ class AdminPanelService:
         data = await state.get_data()
 
         export_regions = data.get('export_regions', [])
+        export_categories = data.get('export_categories', [])
         export_year_from = data.get('export_year_from')
         export_year_to = data.get('export_year_to')
 
         regions_text = f"{len(export_regions)} выбр." if export_regions else "все"
+        categories_text = f"{len(export_categories)} выбр." if export_categories else "все"
         year_from_text = str(export_year_from) if export_year_from else "—"
         year_to_text = str(export_year_to) if export_year_to else "—"
 
         text = (
             "📊 <b>Экспорт в Excel</b>\n\n"
             "<b>Фильтры экспорта:</b>\n"
+            f"• Категории: {categories_text}\n"
             f"• Регионы: {regions_text}\n"
             f"• Период экспертизы: {year_from_text} — {year_to_text}\n\n"
             "1️⃣ Выберите фильтры\n"
@@ -1397,6 +1412,7 @@ class AdminPanelService:
         )
 
         keyboard = [
+            [InlineKeyboardButton(text="📁 Выбрать категории", callback_data=CALLBACK_EXPORT_CATEGORIES)],
             [InlineKeyboardButton(text="📍 Выбрать регионы", callback_data=CALLBACK_EXPORT_REGIONS)],
             [InlineKeyboardButton(text="📅 Период экспертизы", callback_data=CALLBACK_EXPORT_YEARS)],
             [InlineKeyboardButton(text="🔄 Запустить парсинг", callback_data=CALLBACK_EXPORT_RUN_PARSE)],
@@ -1407,6 +1423,63 @@ class AdminPanelService:
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
         await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    async def _show_export_categories_menu(self, callback: CallbackQuery, state: FSMContext, page: int = 0):
+        """Меню выбора категорий для экспорта"""
+        data = await state.get_data()
+        selected = set(data.get('export_categories', []))
+
+        text = (
+            "📁 <b>Категории для экспорта</b>\n\n"
+            f"Выбрано: {len(selected)}\n\n"
+            "Нажмите на категорию для выбора/снятия:"
+        )
+
+        total_pages = (len(self.ALL_CATEGORIES) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+        start_idx = page * ITEMS_PER_PAGE
+        end_idx = min(start_idx + ITEMS_PER_PAGE, len(self.ALL_CATEGORIES))
+
+        keyboard = []
+        for i in range(start_idx, end_idx):
+            category = self.ALL_CATEGORIES[i]
+            is_selected = category in selected
+            emoji = "✅" if is_selected else "⬜"
+            keyboard.append(
+                [InlineKeyboardButton(text=f"{emoji} {category}", callback_data=f"expcat:{i}")]
+            )
+
+        nav_row = []
+        if page > 0:
+            nav_row.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"expcatpage:{page-1}"))
+        if end_idx < len(self.ALL_CATEGORIES):
+            nav_row.append(InlineKeyboardButton(text="Вперёд ▶️", callback_data=f"expcatpage:{page+1}"))
+
+        if nav_row:
+            keyboard.append(nav_row)
+
+        keyboard.append([InlineKeyboardButton(text="🔄 Сбросить категории", callback_data="expcat_reset")])
+        keyboard.append([InlineKeyboardButton(text="✅ Готово", callback_data=CALLBACK_EXPORT_MENU)])
+
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    async def _handle_export_category_toggle(self, callback: CallbackQuery, state: FSMContext, cat_index: int):
+        """Переключить категорию экспорта по индексу"""
+        if cat_index < 0 or cat_index >= len(self.ALL_CATEGORIES):
+            return
+
+        data = await state.get_data()
+        export_categories = list(data.get('export_categories', []))
+        category = self.ALL_CATEGORIES[cat_index]
+
+        if category in export_categories:
+            export_categories.remove(category)
+        else:
+            export_categories.append(category)
+
+        await state.update_data(export_categories=export_categories)
+        current_page = cat_index // ITEMS_PER_PAGE
+        await self._show_export_categories_menu(callback, state, current_page)
 
     async def _show_export_regions_menu(self, callback: CallbackQuery, state: FSMContext, page: int = 0):
         """Меню выбора регионов для экспорта"""
@@ -1537,6 +1610,7 @@ class AdminPanelService:
 
         data = await state.get_data()
         export_regions = data.get('export_regions', [])
+        export_categories = data.get('export_categories', [])
         export_year_from = data.get('export_year_from')
         export_year_to = data.get('export_year_to')
 
@@ -1549,11 +1623,13 @@ class AdminPanelService:
         elif export_year_to:
             expertise_years = [export_year_to]
 
+        categories_text = f"{len(export_categories)} кат." if export_categories else "все"
         regions_text = f"{len(export_regions)} рег." if export_regions else "все"
         years_text = f"{export_year_from or '?'}—{export_year_to or '?'}" if (export_year_from or export_year_to) else "все"
 
         await callback.message.edit_text(
             f"⏳ <b>Парсинг запущен...</b>\n\n"
+            f"Категории: {categories_text}\n"
             f"Регионы: {regions_text}\n"
             f"Годы: {years_text}\n\n"
             f"Это может занять несколько минут.",
@@ -1563,6 +1639,7 @@ class AdminPanelService:
         try:
             result = await self.scheduler.run_bulk_parse(
                 regions=export_regions or None,
+                categories=export_categories or None,
                 expertise_years=expertise_years,
             )
 
@@ -1601,13 +1678,15 @@ class AdminPanelService:
 
             data = await state.get_data()
             export_regions = data.get('export_regions', [])
+            export_categories = data.get('export_categories', [])
             export_year_from = data.get('export_year_from')
             export_year_to = data.get('export_year_to')
 
-            logger.info(f"Export full: regions={export_regions}, year_from={export_year_from}, year_to={export_year_to}")
+            logger.info(f"Export full: categories={export_categories}, regions={export_regions}, year_from={export_year_from}, year_to={export_year_to}")
 
             projects = self.repo.get_projects_filtered(
                 regions=export_regions or None,
+                categories=export_categories or None,
                 year_from=export_year_from,
                 year_to=export_year_to,
             )
@@ -1645,12 +1724,14 @@ class AdminPanelService:
 
             data = await state.get_data()
             export_regions = data.get('export_regions', [])
-            logger.info(f"Export designers: regions={export_regions}, year_from={data.get('export_year_from')}, year_to={data.get('export_year_to')}")
+            export_categories = data.get('export_categories', [])
             export_year_from = data.get('export_year_from')
             export_year_to = data.get('export_year_to')
+            logger.info(f"Export designers: categories={export_categories}, regions={export_regions}, year_from={export_year_from}, year_to={export_year_to}")
 
             projects = self.repo.get_projects_filtered(
                 regions=export_regions or None,
+                categories=export_categories or None,
                 year_from=export_year_from,
                 year_to=export_year_to,
             )

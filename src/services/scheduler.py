@@ -268,7 +268,7 @@ class SchedulerService:
             self._running = False
             self._cancel_event.clear()
 
-    async def run_bulk_parse(self, regions: list = None, expertise_years: list = None) -> dict:
+    async def run_bulk_parse(self, regions: list = None, categories: list = None, expertise_years: list = None) -> dict:
         """Массовый парсинг по заданным фильтрам. Без уведомлений, без фильтра по дате."""
         self._running = True
         self._cancel_event.clear()
@@ -280,6 +280,7 @@ class SchedulerService:
         try:
             logger.info("=" * 60)
             logger.info("МАССОВЫЙ ПАРСИНГ (экспорт)")
+            logger.info(f"  Категории: {categories or 'все'}")
             logger.info(f"  Регионы: {regions or 'все'}")
             logger.info(f"  Годы экспертизы: {expertise_years or 'все'}")
             logger.info("=" * 60)
@@ -287,6 +288,7 @@ class SchedulerService:
             await self.session.ensure_logged_in()
 
             projects = await self.projects_service.fetch_list(
+                categories=categories or None,
                 regions=regions or None,
                 max_cards=0,
                 expertise_years=expertise_years or None,

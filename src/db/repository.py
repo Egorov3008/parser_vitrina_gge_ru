@@ -173,10 +173,15 @@ class Repository:
         )
         return [dict(row) for row in rows] if rows else []
 
-    def get_projects_filtered(self, regions: list = None, year_from: int = None, year_to: int = None) -> list:
-        """Получить проекты с фильтрацией по регионам и годам экспертизы"""
+    def get_projects_filtered(self, regions: list = None, categories: list = None, year_from: int = None, year_to: int = None) -> list:
+        """Получить проекты с фильтрацией по регионам, категориям и годам экспертизы"""
         conditions = []
         params = []
+
+        if categories:
+            placeholders = ','.join('?' for _ in categories)
+            conditions.append(f"category IN ({placeholders})")
+            params.extend(categories)
 
         if regions:
             # Убираем числовой префикс вида "01. " из названий регионов,
