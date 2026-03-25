@@ -506,39 +506,38 @@ class ProjectsService:
         Навигирует на /projects/, устанавливает фильтры, отправляет форму и парсит карточки.
         """
         try:
-            # Перейти на страницу поиска
-            # Сначала убедимся что мы на главной странице (для правильной инициализации сессии)
+            # Перейти на страницу проектов
+            # После авторизации / редиректит на /projects, поэтому идём напрямую
+            projects_url = f"{self.config.vitrina_url}/projects"
+            logger.debug(f"Navigating to {projects_url}")
             try:
-                logger.debug(f"Navigating to {self.config.vitrina_url}/")
-                await page.goto(f"{self.config.vitrina_url}/", wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(1000)
+                await page.goto(projects_url, wait_until="domcontentloaded", timeout=30000)
             except Exception as e:
-                logger.debug(f"Initial navigation note: {e}")
+                # ERR_ABORTED может возникать при редиректе — это нормально
+                logger.debug(f"Navigation note (may be redirect): {e}")
 
-            # Теперь перейти на страницу проектов
-            try:
-                logger.debug(f"Navigating to {self.config.vitrina_url}/projects/")
-                # Переходим на чистую страницу проектов без фильтров
-                await page.goto(f"{self.config.vitrina_url}/projects/", wait_until="networkidle", timeout=30000)
-                await page.wait_for_timeout(2000)
-                logger.debug(f"Navigation complete, current URL: {page.url}")
-            except Exception as e:
-                logger.warning(f"Projects page navigation: {e}")
-                logger.debug(f"Current URL: {page.url}")
-                # Пробуем перейти через клик вместо прямой навигации
-                try:
-                    logger.debug("Trying navigation via link click")
-                    await page.click('a[href*="/projects"]', timeout=5000)
-                    await page.wait_for_timeout(2000)
-                except Exception as e2:
-                    logger.warning(f"Link click navigation also failed: {e2}")
-
-            await page.wait_for_timeout(2000)
-
-            # Проверить что мы на странице проектов
+            await page.wait_for_timeout(3000)
             current_url = page.url
+            logger.debug(f"Navigation complete, current URL: {current_url}")
+
+            # Проверить что мы на странице проектов с фильтрами
             if "/projects" not in current_url:
                 logger.warning(f"Expected /projects page but got: {current_url}")
+                # Попробовать перейти через главную (может запустить редирект)
+                try:
+                    await page.goto(f"{self.config.vitrina_url}/", wait_until="domcontentloaded", timeout=30000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(3000)
+                current_url = page.url
+                logger.debug(f"After fallback navigation, URL: {current_url}")
+
+            # Проверить что фильтры доступны на странице
+            has_filters = await page.evaluate("""
+                () => !!document.querySelector('#filter-function-select-id')
+            """)
+            if not has_filters:
+                logger.warning(f"Filter elements not found on {current_url}, page may not be loaded correctly")
 
             # Сбросить существующие фильтры перед установкой новых
             logger.debug("Resetting existing filters")
@@ -556,9 +555,11 @@ class ProjectsService:
             if expertise_year:
                 await self._set_expertise_year_filter(page, expertise_year)
 
-            # Отправить форму (расширенный поиск если есть год, обычный иначе)
+            # Отправить форму поиска
             if expertise_year:
+                # Сначала применить расширенные фильтры, затем основной поиск
                 await self._submit_advanced_search_form(page)
+                await self._submit_search_form(page)
             else:
                 await self._submit_search_form(page)
 
@@ -817,8 +818,12 @@ class ProjectsService:
 
             # Кликнуть каждую нужную опцию по тексту
             for value in values:
-                # Искать опции внутри видимого дропдауна
-                option = page.locator('.ss-option:not(.ss-disabled)').filter(has_text=value)
+                # Искать опции только внутри открытого дропдауна (не по всей странице)
+                open_content = page.locator('.ss-content.ss-open, .ss-content.ss-open-below, .ss-content.ss-open-above')
+                if await open_content.count() > 0:
+                    option = open_content.first.locator('.ss-option:not(.ss-disabled)').filter(has_text=value)
+                else:
+                    option = page.locator('.ss-option:not(.ss-disabled)').filter(has_text=value)
                 option_count = await option.count()
 
                 if option_count == 0:
@@ -937,8 +942,11 @@ class ProjectsService:
             else:
                 # Fallback: перезагрузить страницу
                 logger.debug("Reset button not found, reloading page")
-                await page.reload(wait_until="networkidle", timeout=30000)
-                await page.wait_for_timeout(2000)
+                try:
+                    await page.reload(wait_until="domcontentloaded", timeout=30000)
+                except Exception:
+                    pass  # ERR_ABORTED при редиректе — нормально
+                await page.wait_for_timeout(3000)
         except Exception as e:
             logger.debug(f"Could not reset filters: {e}")
 
