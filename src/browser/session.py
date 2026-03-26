@@ -78,16 +78,49 @@ class SessionManager:
 
     async def close(self) -> None:
         """Закрыть браузер"""
-        if self.page:
-            await self.page.close()
-        if self.context:
-            await self.context.close()
-        if self.browser:
-            await self.browser.close()
-        if self._pw_context:
-            await self._pw_context.__aexit__(None, None, None)
+        try:
+            if self.page:
+                await self.page.close()
+        except Exception:
+            pass
+        try:
+            if self.context:
+                await self.context.close()
+        except Exception:
+            pass
+        try:
+            if self.browser:
+                await self.browser.close()
+        except Exception:
+            pass
+        try:
+            if self._pw_context:
+                await self._pw_context.__aexit__(None, None, None)
+        except Exception:
+            pass
+        self.page = None
+        self.context = None
+        self.browser = None
+        self.playwright = None
+        self._pw_context = None
         self.is_logged_in = False
+        self.api_token = None
         logger.info("Browser closed")
+
+    def _is_browser_alive(self) -> bool:
+        """Проверить, жив ли процесс браузера"""
+        if self.browser is None or self.page is None:
+            return False
+        try:
+            return self.browser.is_connected()
+        except Exception:
+            return False
+
+    async def restart(self) -> None:
+        """Полный перезапуск: закрыть и заново инициализировать браузер"""
+        logger.warning("Restarting browser...")
+        await self.close()
+        await self.initialize()
 
     async def login(self) -> None:
         """Авторизоваться на портале"""
@@ -169,7 +202,10 @@ class SessionManager:
             raise
 
     async def ensure_logged_in(self) -> None:
-        """Убедиться, что авторизованы"""
+        """Убедиться, что браузер жив и авторизованы"""
+        if not self._is_browser_alive():
+            logger.warning("Browser is dead, restarting...")
+            await self.restart()
         if not self.is_logged_in:
             await self.login()
 

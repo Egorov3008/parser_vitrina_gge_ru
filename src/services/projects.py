@@ -465,8 +465,8 @@ class ProjectsService:
             for year in expertise_years:
                 logger.info(f"Fetching projects for expertise year {year}")
                 try:
-                    year_projects = await self._fetch_browser_search_single(
-                        page, categories, regions, max_cards=max_cards,
+                    year_projects = await self._fetch_browser_search_with_retry(
+                        categories, regions, max_cards=max_cards,
                         expertise_year=str(year),
                     )
                     # Дедупликация по vitrina_id
@@ -483,14 +483,51 @@ class ProjectsService:
 
         # Без фильтра по году — обычный одиночный запрос
         try:
-            projects = await self._fetch_browser_search_single(
-                page, categories, regions, max_cards=max_cards,
+            projects = await self._fetch_browser_search_with_retry(
+                categories, regions, max_cards=max_cards,
             )
             logger.info(f"Fetched {len(projects)} projects via browser search")
             return projects
         except Exception as e:
             logger.error(f"Browser search error: {e}")
             return []
+
+    async def _fetch_browser_search_with_retry(
+        self,
+        categories: Optional[List[str]],
+        regions: Optional[List[str]],
+        max_cards: int = 0,
+        expertise_year: Optional[str] = None,
+        max_retries: int = 2,
+    ) -> List[Project]:
+        """Обёртка над _fetch_browser_search_single с перезапуском браузера при крэше."""
+        for attempt in range(max_retries + 1):
+            try:
+                page = self.session.page
+                return await self._fetch_browser_search_single(
+                    page, categories, regions, max_cards=max_cards,
+                    expertise_year=expertise_year,
+                )
+            except Exception as e:
+                error_msg = str(e)
+                is_connection_error = any(phrase in error_msg for phrase in [
+                    "Connection closed",
+                    "pipe closed",
+                    "Target closed",
+                    "Browser closed",
+                    "browser has been closed",
+                    "Protocol error",
+                    "crashed",
+                ])
+                if is_connection_error and attempt < max_retries:
+                    logger.warning(
+                        f"Browser connection lost (attempt {attempt + 1}/{max_retries + 1}): {e}. "
+                        f"Restarting browser..."
+                    )
+                    await self.session.restart()
+                    await self.session.ensure_logged_in()
+                    continue
+                raise
 
     async def _fetch_browser_search_single(
         self,
@@ -513,6 +550,9 @@ class ProjectsService:
             try:
                 await page.goto(projects_url, wait_until="domcontentloaded", timeout=30000)
             except Exception as e:
+                error_msg = str(e)
+                if "Connection closed" in error_msg or "pipe closed" in error_msg:
+                    raise  # Браузер упал — пробросить для retry
                 # ERR_ABORTED может возникать при редиректе — это нормально
                 logger.debug(f"Navigation note (may be redirect): {e}")
 
@@ -592,6 +632,14 @@ class ProjectsService:
             return projects
 
         except Exception as e:
+            error_msg = str(e)
+            # Пробросить ошибки соединения с браузером для retry в обёртке
+            if any(phrase in error_msg for phrase in [
+                "Connection closed", "pipe closed", "Target closed",
+                "Browser closed", "browser has been closed",
+                "Protocol error", "crashed",
+            ]):
+                raise
             logger.error(f"Browser search error (expertise_year={expertise_year}): {e}")
             return []
 

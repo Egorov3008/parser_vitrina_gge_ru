@@ -8,7 +8,7 @@ from datetime import datetime
 
 from aiogram import Router, F
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -226,6 +226,17 @@ class AdminPanelService:
             self._handle_credential_text,
             AdminFSM.waiting_credential
         )
+
+    @staticmethod
+    async def _safe_edit_text(message, text: str, **kwargs):
+        """edit_text с игнорированием ошибки 'message is not modified'"""
+        try:
+            await message.edit_text(text, **kwargs)
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e):
+                pass  # Контент не изменился — ничего страшного
+            else:
+                raise
 
     def _check_admin(self, user_id: int) -> bool:
         """Проверить права администратора (БД + конфиг)"""
@@ -1584,7 +1595,7 @@ class AdminPanelService:
         keyboard.append([InlineKeyboardButton(text="✅ Готово", callback_data=CALLBACK_EXPORT_MENU)])
 
         reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-        await callback.message.edit_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        await self._safe_edit_text(callback.message, text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def _run_export_parsing(self, callback: CallbackQuery, state: FSMContext):
         """Запустить парсинг с фильтрами экспорта"""
