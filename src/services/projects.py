@@ -346,11 +346,10 @@ class ProjectsService:
 
         # Перейти на страницу проектов для инициализации сессии
         try:
-            await page.goto(f"{self.config.vitrina_url}/projects/", wait_until="domcontentloaded", timeout=30000)
+            await page.goto(f"{self.config.vitrina_url}/projects/", wait_until="networkidle", timeout=60000)
+            await page.wait_for_timeout(2000)
         except Exception as e:
             logger.warning(f"Navigation warning: {e}")
-
-        await page.wait_for_timeout(2000)
 
         # Данные для поиска (пустой поиск = все проекты)
         search_data = {
@@ -437,6 +436,55 @@ class ProjectsService:
                 continue
 
         return projects
+
+    async def _wait_for_filters(self, page, timeout: int = 10000) -> bool:
+        """
+        Ожидать появления элементов фильтров на странице.
+        Возвращает True если фильтры найдены, False иначе.
+        """
+        try:
+            # Ждем появления основных элементов фильтров
+            await page.wait_for_selector('#filter-function-select-id', state='attached', timeout=timeout)
+            await page.wait_for_selector('#filter-region-select-id', state='attached', timeout=timeout)
+            logger.debug("Filter elements found")
+            return True
+        except Exception:
+            logger.debug("Filter elements not found within timeout")
+            return False
+
+    async def _try_find_alternative_filters(self, page) -> None:
+        """
+        Попытаться найти фильтры альтернативными селекторами если основные не найдены.
+        Логирует что найдено для диагностики.
+        """
+        try:
+            # Ищем любые select элементы
+            selects = await page.query_selector_all('select')
+            logger.info(f"Found {len(selects)} select elements on page")
+            
+            for i, select in enumerate(selects):
+                select_id = await select.get_attribute('id')
+                select_name = await select.get_attribute('name')
+                select_class = await select.get_attribute('class')
+                logger.debug(f"  Select {i}: id={select_id}, name={select_name}, class={select_class}")
+            
+            # Ищем любые элементы с классом SlimSelect
+            ss_elements = await page.query_selector_all('.ss-main')
+            logger.info(f"Found {len(ss_elements)} .ss-main elements")
+            
+            # Проверяем, может быть фильтры в другом месте или с другими ID
+            alternative_ids = [
+                'filter-function-select',
+                'filter-region-select',
+                'function-select',
+                'region-select',
+            ]
+            for alt_id in alternative_ids:
+                el = await page.query_selector(f'#{alt_id}')
+                if el:
+                    logger.info(f"Found alternative filter element: #{alt_id}")
+        except Exception as e:
+            logger.warning(f"Error in alternative filter search: {e}")
 
     async def _fetch_via_browser_search(
         self,
@@ -543,47 +591,31 @@ class ProjectsService:
         Навигирует на /projects/, устанавливает фильтры, отправляет форму и парсит карточки.
         """
         try:
-            # Перейти на страницу проектов
-            # После авторизации / редиректит на /projects, поэтому идём напрямую
-            projects_url = f"{self.config.vitrina_url}/projects"
-            logger.debug(f"Navigating to {projects_url}")
-            try:
-                await page.goto(projects_url, wait_until="domcontentloaded", timeout=30000)
-            except Exception as e:
-                error_msg = str(e)
-                if "Connection closed" in error_msg or "pipe closed" in error_msg:
-                    raise  # Браузер упал — пробросить для retry
-                # ERR_ABORTED может возникать при редиректе — это нормально
-                logger.debug(f"Navigation note (may be redirect): {e}")
+            # Перейти напрямую на страницу проектов
+            # Не нужно сначала идти на главную - это вызывает редиректы
+            logger.debug(f"Navigating to {self.config.vitrina_url}/projects/")
+            await page.goto(f"{self.config.vitrina_url}/projects/", wait_until="networkidle", timeout=60000)
+            logger.debug(f"Navigation complete, current URL: {page.url}")
 
+            # Дополнительное ожидание для инициализации SlimSelect
             await page.wait_for_timeout(3000)
-            current_url = page.url
-            logger.debug(f"Navigation complete, current URL: {current_url}")
 
-            # Проверить что мы на странице проектов с фильтрами
-            if "/projects" not in current_url:
-                logger.warning(f"Expected /projects page but got: {current_url}")
-                # Попробовать перейти через главную (может запустить редирект)
-                try:
-                    await page.goto(f"{self.config.vitrina_url}/", wait_until="domcontentloaded", timeout=30000)
-                except Exception:
-                    pass
+            # Если по какой-то причине мы не на странице проектов, попробовать снова
+            if "/projects" not in page.url:
+                logger.warning(f"Expected /projects page but got: {page.url}")
+                logger.debug("Retrying navigation")
+                await page.reload(wait_until="networkidle", timeout=60000)
                 await page.wait_for_timeout(3000)
-                current_url = page.url
-                logger.debug(f"After fallback navigation, URL: {current_url}")
-
-            # Проверить что фильтры доступны на странице
-            has_filters = await page.evaluate("""
-                () => !!document.querySelector('#filter-function-select-id')
-            """)
-            if not has_filters:
-                logger.warning(f"Filter elements not found on {current_url}, page may not be loaded correctly")
-
-            # Сбросить существующие фильтры перед установкой новых
-            logger.debug("Resetting existing filters")
-            await self._reset_filters(page)
+                logger.debug(f"After reload, URL: {page.url}")
 
             # Установить фильтры через ID элементов
+            # Сначала проверим, что элементы фильтров существуют
+            filter_ready = await self._wait_for_filters(page)
+            if not filter_ready:
+                logger.warning("Filter elements not found, page may not be loaded correctly")
+                # Попробовать найти фильтры альтернативными способами
+                await self._try_find_alternative_filters(page)
+
             if categories:
                 logger.debug(f"Setting category filter: {categories}")
                 await self._set_filter_by_select_id(page, "filter-function-select-id", categories)
