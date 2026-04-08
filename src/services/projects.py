@@ -566,6 +566,7 @@ class ProjectsService:
                     "browser has been closed",
                     "Protocol error",
                     "crashed",
+                    "ERR_ABORTED",
                 ])
                 if is_connection_error and attempt < max_retries:
                     logger.warning(
@@ -594,8 +595,20 @@ class ProjectsService:
             # Перейти напрямую на страницу проектов
             # Не нужно сначала идти на главную - это вызывает редиректы
             logger.debug(f"Navigating to {self.config.vitrina_url}/projects/")
-            await page.goto(f"{self.config.vitrina_url}/projects/", wait_until="networkidle", timeout=60000)
+            try:
+                await page.goto(f"{self.config.vitrina_url}/projects/", wait_until="domcontentloaded", timeout=60000)
+            except Exception as nav_error:
+                if "ERR_ABORTED" in str(nav_error):
+                    logger.warning(f"Navigation aborted (likely redirect), waiting for redirect to settle...")
+                    await page.wait_for_timeout(3000)
+                else:
+                    raise
             logger.debug(f"Navigation complete, current URL: {page.url}")
+
+            # Проверить что мы не на странице логина (редирект при истечении сессии)
+            if "login" in page.url.lower() or "modal-auth" in page.url.lower():
+                logger.warning("Redirected to login page - session may have expired, re-authenticating...")
+                raise Exception("Redirected to login - need re-authentication")
 
             # Дополнительное ожидание для инициализации SlimSelect
             await page.wait_for_timeout(3000)
@@ -670,6 +683,8 @@ class ProjectsService:
                 "Connection closed", "pipe closed", "Target closed",
                 "Browser closed", "browser has been closed",
                 "Protocol error", "crashed",
+                "ERR_ABORTED",
+                "Redirected to login",
             ]):
                 raise
             logger.error(f"Browser search error (expertise_year={expertise_year}): {e}")
