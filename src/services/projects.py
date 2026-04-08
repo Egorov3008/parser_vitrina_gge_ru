@@ -826,17 +826,33 @@ class ProjectsService:
         return False
 
     async def _submit_advanced_search_form(self, page) -> None:
-        """Submit the advanced search form by clicking #set-filter-advanced-button-id."""
-        logger.debug("Submitting advanced search form via #set-filter-advanced-button-id")
+        """Apply advanced filters by expanding accordion and submitting search.
+
+        The old #set-filter-advanced-button-id no longer exists. Instead we:
+        1. Ensure the advanced-search accordion is expanded (inputs visible)
+        2. Submit the main search form
+        """
+        logger.debug("Submitting advanced search form (accordion expand + search)")
         btn_selector = '#set-filter-advanced-button-id'
+
         try:
-            await page.wait_for_selector(btn_selector, state='visible', timeout=3000)
-            await page.click(btn_selector, timeout=5000)
+            # Попробовать найти и кликнуть кнопку (если она существует)
+            await page.wait_for_selector(btn_selector, state='visible', timeout=2000)
+            await page.click(btn_selector, timeout=3000)
             logger.debug("Successfully clicked #set-filter-advanced-button-id")
             await page.wait_for_timeout(2000)
-        except Exception as e:
-            logger.warning(f"Error clicking #set-filter-advanced-button-id: {e}, falling back to regular search")
-            await self._submit_search_form(page)
+            return
+        except Exception:
+            logger.debug("Button #set-filter-advanced-button-id not found, using accordion expand")
+
+        # Fallback: расширить accordion и отправить форму
+        expanded = await self._expand_advanced_search_accordion(page)
+        if expanded:
+            logger.debug("Advanced search accordion expanded successfully")
+        else:
+            logger.warning("Could not expand advanced search accordion")
+
+        await self._submit_search_form(page)
 
     async def _set_filter_by_select_id(
         self, page, select_id: str, values: List[str]
@@ -1127,11 +1143,51 @@ class ProjectsService:
         projects = []
 
         try:
-            # Дождаться появления карточек (таймаут 30 сек)
-            await page.wait_for_selector('div.uk-card.uk-card-small', timeout=30000)
+            # Дождаться появления карточек с увеличенным таймаутом и альтернативными селекторами
+            card_selectors = [
+                'div.uk-card.uk-card-small',
+                'div.uk-card-default.uk-card-small',
+                'div.card',
+                '.project-card',
+                '[class*="project-card"]',
+            ]
+
+            card_found = False
+            for selector in card_selectors:
+                try:
+                    await page.wait_for_selector(selector, timeout=10000)
+                    logger.info(f"Cards found via selector: {selector}")
+                    card_found = True
+                    break
+                except Exception:
+                    logger.debug(f"Selector not found: {selector}")
+                    continue
+
+            if not card_found:
+                logger.warning("No card selectors matched — page may have changed structure")
+                # Логировать текущее состояние страницы для диагностики
+                page_title = await page.title()
+                page_url = page.url
+                logger.debug(f"Page title: {page_title}, URL: {page_url}")
+
+                # Проверить есть ли сообщения об ошибках на странице
+                error_text = await page.evaluate("""
+                    () => {
+                        const err = document.querySelector('.uk-alert-warning, .alert, .error, .no-results');
+                        return err ? err.innerText.trim() : null;
+                    }
+                """)
+                if error_text:
+                    logger.warning(f"Page shows error/no-results: {error_text}")
+
+                return projects
 
             # Проверить сколько карточек видно сразу
             initial_cards = await page.query_selector_all('div.uk-card.uk-card-default.uk-card-small.uk-card-hover')
+            if len(initial_cards) == 0:
+                logger.debug("Primary card selector returned 0 cards, trying fallback selector")
+                # Попробовать альтернативный селектор
+                initial_cards = await page.query_selector_all('div.uk-card.uk-card-small')
             logger.info(f"Initial cards visible: {len(initial_cards)}")
             
             # Проверить наличие кнопки "Показать ещё"
@@ -1201,6 +1257,8 @@ class ProjectsService:
                     
                     # Проверить что карточек стало больше — иначе прекратить
                     current_cards = await page.query_selector_all('div.uk-card.uk-card-default.uk-card-small.uk-card-hover')
+                    if len(current_cards) == 0:
+                        current_cards = await page.query_selector_all('div.uk-card.uk-card-small')
                     current_count = len(current_cards)
                     logger.info(f"After attempt #{attempt}: {current_count} cards (prev: {prev_card_count})")
                     if current_count <= prev_card_count:
@@ -1218,6 +1276,9 @@ class ProjectsService:
 
             # Получить все карточки
             cards = await page.query_selector_all('div.uk-card.uk-card-default.uk-card-small.uk-card-hover')
+            if len(cards) == 0:
+                # Fallback на более общий селектор
+                cards = await page.query_selector_all('div.uk-card.uk-card-small')
             logger.info(f"Found {len(cards)} cards on search page")
 
             if not cards:
