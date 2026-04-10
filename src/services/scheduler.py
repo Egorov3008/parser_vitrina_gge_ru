@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -138,11 +139,15 @@ class SchedulerService:
             if expertise_years:
                 logger.info(f"Expertise years for server-side filter: {expertise_years}")
 
+            # Очистить числовые префиксы из регионов (формат "77. г. Москва" → "г. Москва"),
+            # т.к. SlimSelect на сайте содержит регионы без префиксов
+            clean_regions = [re.sub(r'^\d+\.\s*', '', r) for r in settings.filter_regions] if settings.filter_regions else None
+
             # Получить список проектов с серверными фильтрами (категория, регион, год экспертизы)
-            logger.info(f"Calling fetch_list with: categories={settings.filter_categories or None}, regions={settings.filter_regions or None}, expertise_years={expertise_years}")
+            logger.info(f"Calling fetch_list with: categories={settings.filter_categories or None}, regions={clean_regions or None}, expertise_years={expertise_years}")
             projects = await self.projects_service.fetch_list(
                 categories=settings.filter_categories or None,
-                regions=settings.filter_regions or None,
+                regions=clean_regions or None,
                 max_cards=self._max_cards,
                 expertise_years=expertise_years,
             )
@@ -287,9 +292,13 @@ class SchedulerService:
 
             await self.session.ensure_logged_in()
 
+            # Очистить числовые префиксы из регионов (формат "77. г. Москва" → "г. Москва"),
+            # т.к. SlimSelect на сайте содержит регионы без префиксов
+            clean_regions = [re.sub(r'^\d+\.\s*', '', r) for r in regions] if regions else None
+
             projects = await self.projects_service.fetch_list(
                 categories=categories or None,
-                regions=regions or None,
+                regions=clean_regions or None,
                 max_cards=0,
                 expertise_years=expertise_years or None,
             )
